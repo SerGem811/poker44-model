@@ -1,0 +1,12 @@
+pydantic>=2.6
+requests>=2.31
+pytest
+bittensor==10.0.0
+typing-extensions
+python-dotenv>=1.0
+loguru>=0.7
+wandb>=0.17
+numpy>=1.24
+scikit-learn>=1.3
+torch>=2.9.1
+pandas>=2.3.3

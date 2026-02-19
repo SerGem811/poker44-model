@@ -1,0 +1,9 @@
+[project]
+name = "poker44"
+version = "0.1.0"
+description = "Poker44 – Poker bot detection subnet for Bittensor"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bittensor>=10.0.0",
+]
