@@ -28,9 +28,13 @@ async def forward(validator) -> None:
 async def _run_forward_cycle(validator) -> None:
     validator.forward_count = getattr(validator, "forward_count", 0) + 1
     bt.logging.info(f"[Forward #{validator.forward_count}] start")
-    
-    # Fetch multiple batches (e.g., 10 batches at once)
-    batches = validator.provider.fetch_hand_batch(limit=10)
+
+    if hasattr(validator.provider, "refresh_if_due"):
+        validator.provider.refresh_if_due()
+
+    # Fetch all configured chunks from the stable dataset snapshot.
+    chunk_limit = int(getattr(validator, "chunk_batch_size", 80))
+    batches = validator.provider.fetch_hand_batch(limit=chunk_limit)
     if not batches:
         bt.logging.info("No hands fetched from dataset; sleeping.")
         await asyncio.sleep(validator.poll_interval)

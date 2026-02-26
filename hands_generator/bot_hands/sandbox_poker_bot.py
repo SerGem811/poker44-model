@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from enum import Enum
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import random
 import json
@@ -161,12 +162,14 @@ class SandboxPokerBot:
     def _load_hand_strengths(self) -> Dict[str, float]:
         """Load pre-computed hand strengths from CSV."""
         try:
-            calculated_df = pd.read_csv('./hands_generator/bot_hands/hole_strengths.csv')
+            csv_path = Path(__file__).resolve().with_name("hole_strengths.csv")
+            if not csv_path.exists():
+                return {}
+            calculated_df = pd.read_csv(csv_path)
             holes = calculated_df.Holes
             strengths = calculated_df.Strengths
             return dict(zip(holes, strengths))
-        except Exception as e:
-            print(f"Unexpected error: {e}")
+        except Exception:
             return {}
 
     def _rank_to_numeric(self, rank: str) -> int:
@@ -284,8 +287,6 @@ class SandboxPokerBot:
         # If we have actual hand strength from CSV, use it
         hs = state.hand_strength
         if hs is None:
-            print(f"HAND STRENGTH MISSING: {state.hole_cards}")
-            
             pseudo_strength = self.rng.random() * 0.65 + 0.35 * pos_factor
             if pseudo_strength < play_threshold and legal.can_fold:
                 return BotDecision(ActionType.FOLD, 0, {"reason": "preflop_pseudo_fold"})
