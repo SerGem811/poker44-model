@@ -136,9 +136,10 @@ indicate "bot".
 
 1. **Serve your axon.** Keep your node online so validators can hit it with
    hand-history queries.
-2. **Return classification labels.** Miners are rewarded on F1, average precision,
-   and low false positives. Only the single top-scoring eligible miner receives
-   non-zero miner emissions in each scoring window.
+2. **Return calibrated bot-risk scores.** Miners are rewarded on average
+   precision, bot recall, and low false positives on humans. Only the single
+   top-scoring eligible miner receives non-zero miner emissions in each scoring
+   window.
 3. **Generalise.** Datasets evolve with harder, more human-like bots. Models that
    adapt quickly keep their rewards as difficulty ramps.
 

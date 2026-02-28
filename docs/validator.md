@@ -56,7 +56,11 @@ btcli wallet overview \
 
 
 #### Run validator using pm2
+`POKER44_HUMAN_JSON_PATH` is required. Without it, the validator will fail fast
+at startup.
+
 ```bash
+POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
 pm2 start python --name poker44_validator -- \
   ./neurons/validator.py \
   --netuid 87 \
@@ -84,6 +88,7 @@ If you want to run it with the help of bash script;
 Script for running the validator is at `scripts/validator/run/run_vali.sh`
 
 - Update the hotkey, coldkey, name, network as needed
+- Set `POKER44_HUMAN_JSON_PATH` inside the script to your private local human dataset
 - Make the script executable: `chmod + x ./scripts/validator/run/run_vali.sh`
 - Run the script: `./scripts/validator/run/run_vali.sh`
 
@@ -108,7 +113,8 @@ What happens each cycle:
 
 1. Labeled hands (actions, timing, integrity signals) are fetched.
 2. A batch is generated consisting of a single hand type & multiple batches are used to create a chunk.
-3. Chunks are dispatched to miners; responses are scored with F1-heavy rewards.
+3. Chunks are dispatched to miners; responses are scored with average precision,
+   bot recall, and a hard false-positive penalty on humans.
 4. Rewards are logged and used to update weights with a winner-take-all policy:
    97% to UID 0 and 3% to the single top-scoring eligible miner. If no miner
    achieves a positive score, 100% goes to UID 0 for that cycle.

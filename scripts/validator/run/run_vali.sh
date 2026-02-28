@@ -8,9 +8,16 @@ HOTKEY="poker44-hk"
 NETWORK="test"  ## "finney" for mainnet; "test" for testnet
 VALIDATOR_SCRIPT="./neurons/validator.py"
 PM2_NAME="poker44_validator"  ##  name of validator, as you wish
+POKER44_HUMAN_JSON_PATH="/path/to/private/poker_data_combined.json"
 
 if [ ! -f "$VALIDATOR_SCRIPT" ]; then
     echo "Error: Validator script not found at $VALIDATOR_SCRIPT"
+    exit 1
+fi
+
+if [ ! -f "$POKER44_HUMAN_JSON_PATH" ]; then
+    echo "Error: Private validator human dataset not found at $POKER44_HUMAN_JSON_PATH"
+    echo "Set POKER44_HUMAN_JSON_PATH in scripts/validator/run/run_vali.sh before starting."
     exit 1
 fi
 
@@ -22,6 +29,7 @@ fi
 pm2 delete $PM2_NAME 2>/dev/null || true
 
 export PYTHONPATH="/root/Poker44-subnet"
+export POKER44_HUMAN_JSON_PATH="$POKER44_HUMAN_JSON_PATH"
 
 pm2 start $VALIDATOR_SCRIPT \
   --name $PM2_NAME -- \
