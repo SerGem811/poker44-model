@@ -92,7 +92,9 @@ class Validator(BaseValidatorNeuron):
             f"chunks={chunk_count} hands_range=[{min_hands_per_chunk},{max_hands_per_chunk}] "
             f"ratio={human_ratio} refresh_s={refresh_seconds}"
         )
-        self.poll_interval = self.settings.poll_interval_seconds
+        self.poll_interval = int(
+            os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(refresh_seconds))
+        )
         self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "50"))
         self.prediction_buffer = {}
         self.label_buffer = {}

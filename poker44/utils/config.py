@@ -53,7 +53,7 @@ def add_args(cls, parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--poll_interval_seconds",
         type=int,
-        default=60,
+        default=12 * 60 * 60,
         help="Default delay between validator ingestion cycles.",
     )
     parser.add_argument(

@@ -80,6 +80,7 @@ Validators:
   - Timing, pacing, and adaptation traces
   - Contextual metadata and integrity hints
 - Query miners and score responses using a validator metrics framework
+- Refresh the evaluation snapshot and query miners every 12 hours by default
 - Enforce low false-positive rates through strong penalties
 
 ### Miners

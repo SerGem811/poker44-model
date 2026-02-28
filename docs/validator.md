@@ -33,6 +33,10 @@ and point `POKER44_HUMAN_JSON_PATH` at that file. Bot hands are created on the
 fly during validator dataset construction. No manual player list is required;
 the validator builds labeled human/bot chunks internally.
 
+By default, the validator refreshes its dataset and queries miners once every
+12 hours. The same cadence is used for dataset rotation and miner evaluation
+unless you override it explicitly.
+
 ---
 
 ### Register on Subnet 87
@@ -119,7 +123,7 @@ What happens each cycle:
    97% to UID 0 and 3% to the single top-scoring eligible miner. If no miner
    achieves a positive score, 100% goes to UID 0 for that cycle.
 
-The script currently prints results and sleeps for `poll_interval` seconds before repeating.
+The script currently sleeps for 12 hours between evaluation cycles by default.
 
 ---
 
