@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import gzip
 import json
 import random
 import time
@@ -15,7 +16,8 @@ from hands_generator.data_generator import _default_bot_profiles, generate_bot_c
 from poker44.core.hand_json import from_standard_json
 from poker44.core.models import LabeledHandBatch
 
-DEFAULT_HUMAN_JSON_PATH = Path(__file__).resolve().parents[2] / "poker_data_combined.json"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_HUMAN_JSON_PATH = REPO_ROOT / "hands_generator" / "human_hands" / "poker_hands_combined.json.gz"
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "validator_mixed_chunks.json"
 
 
@@ -33,7 +35,8 @@ class MixedDatasetConfig:
 
 def _iter_top_level_array_objects(path: Path, chunk_size: int = 1024 * 1024) -> Iterator[str]:
     """Yield object JSON strings from a top-level JSON array without loading the whole file."""
-    with path.open("r", encoding="utf-8") as f:
+    opener = gzip.open if path.suffix == ".gz" else path.open
+    with opener(path, "rt", encoding="utf-8") as f:
         in_string = False
         escape = False
         depth = 0

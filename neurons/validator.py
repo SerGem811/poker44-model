@@ -33,7 +33,6 @@ from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
 from poker44.validator.forward import forward as forward_cycle
 from hands_generator.mixed_dataset_provider import (
-    DEFAULT_HUMAN_JSON_PATH,
     DEFAULT_OUTPUT_PATH,
     MixedDatasetConfig,
     TimedMixedDatasetProvider,
@@ -56,9 +55,13 @@ class Validator(BaseValidatorNeuron):
         self.forward_count = 0
         self.settings = cfg
 
-        human_json_path = Path(
-            os.getenv("POKER44_HUMAN_JSON_PATH", str(DEFAULT_HUMAN_JSON_PATH))
-        ).expanduser().resolve()
+        human_json_env = os.getenv("POKER44_HUMAN_JSON_PATH")
+        if not human_json_env:
+            raise RuntimeError(
+                "POKER44_HUMAN_JSON_PATH must point to the private local human-hand JSON used by validators."
+            )
+
+        human_json_path = Path(human_json_env).expanduser().resolve()
         mixed_output_path = Path(
             os.getenv("POKER44_MIXED_DATASET_PATH", str(DEFAULT_OUTPUT_PATH))
         ).expanduser().resolve()
