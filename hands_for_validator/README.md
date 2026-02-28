@@ -1,15 +1,22 @@
 # hands_for_validator
 
-Esta carpeta contiene utilidades para exponer manos de poker en JSON con FastAPI, cargando el archivo desde local (sin subirlo al repo).
+Utilities to expose poker hands as JSON via FastAPI.
 
-## Archivos
+The public repo now ships a compressed human-hand corpus for miner training at:
 
-- `rar_to_json.py`: convierte un `.rar` de historiales a un `poker_hands_from_rar.json`.
-- `json_api.py`: API FastAPI que lee ese JSON local.
+`hands_generator/human_hands/poker_hands_combined.json.gz`
 
-## Uso local
+This folder remains useful for local validator workflows that need to expose a
+separate local JSON file over an API instead of using the bundled corpus.
 
-1. Genera el JSON local:
+## Files
+
+- `rar_to_json.py`: converts a `.rar` archive of histories into a local JSON file.
+- `json_api.py`: FastAPI app that reads a local JSON file.
+
+## Local usage
+
+1. Generate a local JSON file:
 
 ```bash
 cd poker_hand_service
@@ -20,7 +27,7 @@ PYTHONPATH=. python3 scripts/rar_to_json.py \
   --output-json ../Poker44-subnet/hands_for_validator/poker_hands_from_rar.json
 ```
 
-2. Levanta la API:
+2. Start the API:
 
 ```bash
 cd Poker44-subnet
@@ -28,8 +35,8 @@ cd Poker44-subnet
 uvicorn hands_for_validator.json_api:app --host 127.0.0.1 --port 8000
 ```
 
-Opcionalmente, define una ruta distinta:
+Optionally, point it at a different local file:
 
 ```bash
-POKER_JSON_PATH=/ruta/local/poker_hands_from_rar.json uvicorn hands_for_validator.json_api:app --host 127.0.0.1 --port 8000
+POKER_JSON_PATH=/path/to/local/poker_hands_from_rar.json uvicorn hands_for_validator.json_api:app --host 127.0.0.1 --port 8000
 ```

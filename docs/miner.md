@@ -89,6 +89,35 @@ Keep the process running so validators can send canonical hand payloads to your
 axon. The reference miner ships with a simple heuristic model; swap in your own
 in `neurons/miner.py` for better scores.
 
+### Public training corpus
+
+The public repo includes a compressed human-hand corpus at:
+
+`hands_generator/human_hands/poker_hands_combined.json.gz`
+
+This file is meant to be a starting point for miner training. Poker44 does not
+ship a public mixed human+bot training dataset. Instead, miners are expected to:
+
+1. Use the public human corpus as a base.
+2. Generate bot hands with the provided generator in `hands_generator/bot_hands/`.
+3. Build their own labels, features, balancing strategy, and training pipeline.
+
+This is intentional: the subnet rewards generalization, not memorization of a
+single public benchmark.
+
+This public human corpus is for miners. Validators should evaluate on a
+separate private local human dataset that is not distributed in the public repo.
+
+To generate a starter bot corpus locally:
+
+```bash
+cd Poker44-subnet
+python3 hands_generator/bot_hands/generate_poker_data.py
+```
+
+This writes `hands_generator/bot_hands/bot_hands.json`, which you can combine
+with the public human corpus however you want for training.
+
 ### What arrives in each request?
 
 Validators send a `DetectionSynapse` containing:

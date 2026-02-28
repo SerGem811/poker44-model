@@ -27,8 +27,11 @@ pip install -e .
 ```
 
 ___
-Validators automatically ingest the labeled hands provided by the Poker44
-adapter. Human hands are chosen randomly out of massive dataset whereas bot hands are created on the fly to generate near perfect poker hands. No manual player list is required; the dataset already contains ground truth labels for bots and humans.
+Validators do not use the public human corpus shipped in the repo. For
+evaluation, each validator must have a separate private local human-hand JSON
+and point `POKER44_HUMAN_JSON_PATH` at that file. Bot hands are created on the
+fly during validator dataset construction. No manual player list is required;
+the validator builds labeled human/bot chunks internally.
 
 ---
 
@@ -54,6 +57,19 @@ btcli wallet overview \
 
 #### Run validator using pm2
 ```bash
+pm2 start python --name poker44_validator -- \
+  ./neurons/validator.py \
+  --netuid 87 \
+  --wallet.name p44_cold \
+  --wallet.hotkey p44_validator \
+  --subtensor.network finney \
+  --logging.debug
+```
+
+Example with explicit private human corpus:
+
+```bash
+POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
 pm2 start python --name poker44_validator -- \
   ./neurons/validator.py \
   --netuid 87 \

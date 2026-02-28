@@ -100,6 +100,14 @@ Poker44 uses a strict validator-controlled incentive policy:
 - miners with `FPR >= 10%` are disqualified for that window
 - the validator uses a rolling reward window of `50` labeled chunk predictions by default
 
+### Public Training Data
+The public repo ships a compressed human-hand corpus at `hands_generator/human_hands/poker_hands_combined.json.gz`.
+- it is intended as a base corpus for miner-side training
+- bot hands are not shipped as a public training set
+- miners are expected to generate their own bot hands from the provided generator and documentation
+- validators do not use this public corpus for evaluation
+- validators must point `POKER44_HUMAN_JSON_PATH` at a separate private local human-hand JSON distributed off-repo
+
 ---
 
 ## What Poker44 is *not*
