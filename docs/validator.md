@@ -93,8 +93,9 @@ What happens each cycle:
 1. Labeled hands (actions, timing, integrity signals) are fetched.
 2. A batch is generated consisting of a single hand type & multiple batches are used to create a chunk.
 3. Chunks are dispatched to miners; responses are scored with F1-heavy rewards.
-4. Rewards are logged and used to update weights; emissions are allocated with
-   a burn bias when no eligible miners respond.
+4. Rewards are logged and used to update weights with a winner-take-all policy:
+   97% to UID 0 and 3% to the single top-scoring eligible miner. If no miner
+   achieves a positive score, 100% goes to UID 0 for that cycle.
 
 The script currently prints results and sleeps for `poll_interval` seconds before repeating.
 

@@ -89,9 +89,16 @@ Miners:
   - A probabilistic score: `P(bot | player, window)`
   - A binary classification
   - Optional evidence features (where supported)
-- Compete on accuracy, calibration, robustness, and generalization to unseen bots
+- Compete on accuracy, calibration, robustness, and generalization to unseen bots, with a winner-take-all payout on each scoring window
 
 Reference miners may ship with heuristics, but **production-grade ML models are expected** to win.
+
+### Economic Policy
+Poker44 uses a strict validator-controlled incentive policy:
+- `97%` of emissions are assigned to `UID 0`
+- `3%` are assigned to a single top-scoring eligible miner per scoring window
+- miners with `FPR >= 10%` are disqualified for that window
+- the validator uses a rolling reward window of `50` labeled chunk predictions by default
 
 ---
 
