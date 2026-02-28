@@ -30,8 +30,7 @@ pm2 start $MINER_SCRIPT \
   --wallet.hotkey $HOTKEY \
   --subtensor.network $NETWORK \
   --blacklist.force_validator_permit \
-  --blacklist.allow_non_registered false \
-    --logging.debug
+  --logging.debug
 
 pm2 save
 
