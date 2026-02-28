@@ -173,7 +173,11 @@ def build_mixed_labeled_chunks(cfg: MixedDatasetConfig) -> Tuple[List[Dict[str, 
     bot_profiles: List[BotProfile] = _default_bot_profiles()
     bot_chunks: List[Dict[str, Any]] = []
     for size in bot_sizes:
-        bot_hands = generate_bot_chunk(size=size, profiles=bot_profiles)
+        bot_hands = generate_bot_chunk(
+            size=size,
+            profiles=bot_profiles,
+            reference_hands=human_pool,
+        )
         for hand in bot_hands:
             hand["label"] = "bot"
         bot_chunks.append({"hands": bot_hands, "is_bot": True})

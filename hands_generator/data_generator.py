@@ -71,9 +71,20 @@ def sample_human_chunk(
 def generate_bot_chunk(
     size: int,
     profiles: List[BotProfile],
+    reference_hands: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
-    generator = PokerHandGenerator()
-    session = TableSession(table_id="Generated", bot_profiles=profiles)
+    generator = PokerHandGenerator(reference_hands=reference_hands)
+    sb, bb, target_players = generator._sample_table_config()
+    session = TableSession(
+        table_id="Generated",
+        sb=sb,
+        bb=bb,
+        max_seats=generator.max_seats,
+        rake_rate=generator.rake_rate,
+        bot_profiles=profiles,
+        target_player_count=target_players,
+        rng=generator.rng,
+    )
     session.initialize_table()
 
     chunk: List[Dict[str, Any]] = []

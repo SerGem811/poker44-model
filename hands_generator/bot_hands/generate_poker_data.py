@@ -2,9 +2,10 @@ import json
 import random
 import hashlib
 import copy
+import gzip
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import sys
 from hands_generator.bot_hands.sandbox_poker_bot import SandboxPokerBot, BotProfile, GameState, LegalActions, Street, ActionType, BotDecision
@@ -15,6 +16,94 @@ CURRENT_DATE = str(datetime.now())
 SALT = f"poker_anonymizer_2025_secret_salt_change_me {CURRENT_DATE}"
 BOT_RNG_SEED = int(hashlib.sha256(SALT.encode()).hexdigest(), 16) % 1000001
 HERO_UID = f"p_{hashlib.sha256('hero_player_fixed_2025_secret'.encode()).hexdigest()}"
+PUBLIC_HUMAN_HANDS_PATH = Path(__file__).resolve().parents[1] / "human_hands" / "poker_hands_combined.json.gz"
+DEFAULT_STAKE_DISTRIBUTION: List[Tuple[float, float, int]] = [
+    (0.02, 0.05, 4660),
+    (0.05, 0.10, 337),
+    (0.01, 0.02, 3),
+]
+DEFAULT_PLAYER_COUNT_DISTRIBUTION: List[Tuple[int, int]] = [
+    (6, 4203),
+    (5, 601),
+    (4, 191),
+    (3, 2),
+    (2, 2),
+]
+DEFAULT_STACK_BB_RANGE: Tuple[float, float] = (60.0, 160.0)
+
+
+def _weighted_choice(weighted_values, rng: random.Random):
+    values = [value for value, _weight in weighted_values]
+    weights = [weight for _value, weight in weighted_values]
+    return rng.choices(values, weights=weights, k=1)[0]
+
+
+def _build_reference_distribution(hands: List[Dict[str, Any]]) -> Dict[str, List]:
+    stake_counts: Dict[Tuple[float, float], int] = {}
+    player_counts: Dict[int, int] = {}
+
+    for hand in hands:
+        metadata = hand.get("metadata") or {}
+        sb = round(float(metadata.get("sb", 0.02) or 0.02), 2)
+        bb = round(float(metadata.get("bb", 0.05) or 0.05), 2)
+        stake_counts[(sb, bb)] = stake_counts.get((sb, bb), 0) + 1
+
+        n_players = len(hand.get("players") or [])
+        if n_players >= 2:
+            player_counts[n_players] = player_counts.get(n_players, 0) + 1
+
+    stakes = [(sb, bb, count) for (sb, bb), count in stake_counts.items()]
+    players = list(player_counts.items())
+    return {
+        "stakes": stakes or DEFAULT_STAKE_DISTRIBUTION,
+        "player_counts": players or DEFAULT_PLAYER_COUNT_DISTRIBUTION,
+    }
+
+
+def _load_reference_distribution() -> Dict[str, List]:
+    if not PUBLIC_HUMAN_HANDS_PATH.exists():
+        return {
+            "stakes": DEFAULT_STAKE_DISTRIBUTION,
+            "player_counts": DEFAULT_PLAYER_COUNT_DISTRIBUTION,
+        }
+
+    opener = gzip.open if PUBLIC_HUMAN_HANDS_PATH.suffix == ".gz" else open
+    try:
+        with opener(PUBLIC_HUMAN_HANDS_PATH, "rt", encoding="utf-8") as f:
+            hands = json.load(f)
+    except Exception:
+        return {
+            "stakes": DEFAULT_STAKE_DISTRIBUTION,
+            "player_counts": DEFAULT_PLAYER_COUNT_DISTRIBUTION,
+        }
+    return _build_reference_distribution(hands)
+
+
+def _clamp_float(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _mutate_profile(profile: BotProfile, rng: random.Random) -> BotProfile:
+    """Create a nearby profile variant so bots are not carbon copies."""
+    return BotProfile(
+        name=f"{profile.name}_v{rng.randint(1, 9999)}",
+        tightness=_clamp_float(profile.tightness + rng.uniform(-0.08, 0.08), 0.20, 0.90),
+        aggression=_clamp_float(profile.aggression + rng.uniform(-0.10, 0.10), 0.15, 0.95),
+        bluff_freq=_clamp_float(profile.bluff_freq + rng.uniform(-0.03, 0.03), 0.0, 0.25),
+        max_risk_fraction_of_stack=_clamp_float(
+            profile.max_risk_fraction_of_stack + rng.uniform(-0.05, 0.05), 0.08, 0.35
+        ),
+        tilt_factor=_clamp_float(profile.tilt_factor + rng.uniform(-0.08, 0.08), 0.0, 0.5),
+        bet_pot_fraction_small=_clamp_float(
+            profile.bet_pot_fraction_small + rng.uniform(-0.08, 0.08), 0.15, 0.55
+        ),
+        bet_pot_fraction_medium=_clamp_float(
+            profile.bet_pot_fraction_medium + rng.uniform(-0.10, 0.10), 0.25, 0.90
+        ),
+        bet_pot_fraction_large=_clamp_float(
+            profile.bet_pot_fraction_large + rng.uniform(-0.10, 0.12), 0.45, 1.25
+        ),
+    )
 
 @dataclass
 class Player:
@@ -38,14 +127,18 @@ class TableSession:
         bb: float = 0.05,
         max_seats: int = 6,
         rake_rate: float = 0.05,
-        bot_profiles: List[BotProfile] = None
+        bot_profiles: List[BotProfile] = None,
+        target_player_count: Optional[int] = None,
+        rng: Optional[random.Random] = None,
     ):
+        self.rng = rng or random.Random()
         self.table_id = table_id
         self.sb = sb
         self.bb = bb
         self.max_seats = max_seats
         self.rake_rate = rake_rate
         self.bot_profiles = bot_profiles or []
+        self.target_player_count = max(2, min(max_seats, target_player_count or max_seats))
         self.players: List[Optional[Player]] = [None] * max_seats
         self.button_position = 0
         self.hero_seat: Optional[int] = None
@@ -60,31 +153,35 @@ class TableSession:
             player_hash = hashlib.sha256(hash_input.encode()).hexdigest()
             # Store raw hex (no prefix); prefix added at seat assignment time
             self.available_names.append(player_hash)
-        random.shuffle(self.available_names)
+        self.rng.shuffle(self.available_names)
 
     def initialize_table(self):
         # Randomize hero seat to mirror human variance
-        self.hero_seat = random.randint(1, self.max_seats)
-        hero_profile = random.choice(self.bot_profiles)
+        self.hero_seat = self.rng.randint(1, self.max_seats)
+        hero_profile = _mutate_profile(self.rng.choice(self.bot_profiles), self.rng)
         hero = Player(
             uid=HERO_UID,
             seat=self.hero_seat,
-            stack=round(random.uniform(8.0, 12.0), 2),
+            stack=self._sample_stack(),
             is_bot=True,
             hands_played=0
         )
-        hero.bot_instance = SandboxPokerBot(hero_profile, rng_seed=BOT_RNG_SEED)
+        hero.bot_instance = SandboxPokerBot(hero_profile, rng_seed=self.rng.randint(0, 10**9))
         self.players[self.hero_seat - 1] = hero
         
         # Fill remaining seats
-        num_bots = random.randint(3, self.max_seats - 1)
+        num_bots = max(1, self.target_player_count - 1)
         available_seats = [s for s in range(1, self.max_seats + 1) if s != self.hero_seat]
-        random.shuffle(available_seats)
+        self.rng.shuffle(available_seats)
         for seat in available_seats[: num_bots]:
             self._add_player_to_seat(seat)
         
         occupied = [i for i, p in enumerate(self.players) if p is not None]
-        self.button_position = random.choice(occupied)
+        self.button_position = self.rng.choice(occupied)
+
+    def _sample_stack(self) -> float:
+        stack_bb = self.rng.uniform(*DEFAULT_STACK_BB_RANGE)
+        return round(stack_bb * self.bb, 2)
 
     def _add_player_to_seat(self, seat_index: int):
         if seat_index == self.hero_seat or self.players[seat_index - 1] is not None:
@@ -94,14 +191,14 @@ class TableSession:
         uid = self.available_names.pop()
         if uid.startswith("p_"):
             uid = uid[2:]
-        profile = random.choice(self.bot_profiles)
+        profile = _mutate_profile(self.rng.choice(self.bot_profiles), self.rng)
         player = Player(
             uid=f"p_{uid}",
             seat=seat_index,
-            stack=round(random.uniform(4.0, 15.0), 2),
+            stack=self._sample_stack(),
             is_bot=True
         )
-        player.bot_instance = SandboxPokerBot(profile, rng_seed=BOT_RNG_SEED)
+        player.bot_instance = SandboxPokerBot(profile, rng_seed=self.rng.randint(0, 10**9))
         self.players[seat_index - 1] = player
 
     def _remove_player(self, seat_index: int):
@@ -128,30 +225,104 @@ class TableSession:
         hero_idx = self.hero_seat - 1 if self.hero_seat else 0
         occupied_non_hero = [i for i in range(self.max_seats) if i != hero_idx and self.players[i] is not None]
         empty_seats = [i + 1 for i in range(self.max_seats) if i != hero_idx and self.players[i] is None]
+        current_players = len(self.get_active_players())
+        desired_players = self.target_player_count
         
         # Leave
-        if len(occupied_non_hero) > 1 and random.random() < 0.10:
+        leave_prob = 0.03 if current_players <= desired_players else 0.15
+        if len(occupied_non_hero) > 1 and self.rng.random() < leave_prob:
             weights = [3.0 if self.players[i].stack < self.bb * 3 else 1.0 for i in occupied_non_hero]
-            leaving_idx = random.choices(occupied_non_hero, weights=weights)[0]
+            leaving_idx = self.rng.choices(occupied_non_hero, weights=weights, k=1)[0]
             self._remove_player(leaving_idx + 1)
         
         # Join
-        if empty_seats and random.random() < 0.15:
-            join_seat = random.choice(empty_seats)
+        join_prob = 0.18 if current_players < desired_players else 0.04
+        if empty_seats and self.rng.random() < join_prob:
+            join_seat = self.rng.choice(empty_seats)
             self._add_player_to_seat(join_seat)
 
     def get_active_players(self) -> List[Player]:
         return [p for p in self.players if p is not None]
 
 class PokerHandGenerator:
-    def __init__(self, sb=0.02, bb=0.05, max_seats=6, rake_rate=0.05):
+    def __init__(
+        self,
+        sb=0.02,
+        bb=0.05,
+        max_seats=6,
+        rake_rate=0.05,
+        reference_hands: Optional[List[Dict[str, Any]]] = None,
+    ):
+        self.rng = random.Random(BOT_RNG_SEED)
         self.sb = sb
         self.bb = bb
         self.max_seats = max_seats
         self.rake_rate = rake_rate
+        self.reference_distribution = (
+            _build_reference_distribution(reference_hands)
+            if reference_hands
+            else _load_reference_distribution()
+        )
         self.hand_counter = 258890000000
         self.suits = ['s', 'h', 'd', 'c']
         self.ranks = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
+
+    def _sample_table_config(self) -> Tuple[float, float, int]:
+        stakes = self.reference_distribution["stakes"]
+        player_counts = self.reference_distribution["player_counts"]
+
+        stake_choice = _weighted_choice([((sb, bb), count) for sb, bb, count in stakes], self.rng)
+        target_players = _weighted_choice(player_counts, self.rng)
+        sb, bb = stake_choice
+        return sb, bb, int(target_players)
+
+    def _hand_is_consistent(self, hand: Dict[str, Any]) -> bool:
+        players = hand.get("players") or []
+        actions = hand.get("actions") or []
+        outcome = hand.get("outcome") or {}
+        metadata = hand.get("metadata") or {}
+
+        if not players or not actions:
+            return False
+
+        seats = sorted(p.get("seat") for p in players if p.get("seat") is not None)
+        if seats != list(range(1, len(seats) + 1)):
+            return False
+
+        seat_set = set(seats)
+        hero_seat = metadata.get("hero_seat")
+        button_seat = metadata.get("button_seat")
+        if hero_seat not in seat_set or button_seat not in seat_set:
+            return False
+
+        try:
+            total_pot = round(float(outcome.get("total_pot", 0.0)), 2)
+            rake = round(float(outcome.get("rake", 0.0)), 2)
+            payout_sum = round(sum(float(v) for v in (outcome.get("payouts") or {}).values()), 2)
+        except Exception:
+            return False
+        if round(payout_sum + rake, 2) != total_pot:
+            return False
+
+        last_pot_after = None
+        for action in actions:
+            actor_seat = action.get("actor_seat")
+            if actor_seat not in seat_set:
+                return False
+            pot_before = round(float(action.get("pot_before", 0.0)), 2)
+            pot_after = round(float(action.get("pot_after", 0.0)), 2)
+            if pot_before < 0 or pot_after < 0:
+                return False
+            if last_pot_after is not None and round(last_pot_after, 2) != pot_before:
+                return False
+            if action.get("action_type") == "uncalled_bet_return":
+                if pot_after > pot_before:
+                    return False
+            elif pot_after < pot_before:
+                return False
+            last_pot_after = pot_after
+
+        return True
 
     def generate_hands(
         self,
@@ -174,26 +345,34 @@ class PokerHandGenerator:
         while hands_generated < num_hands_to_play:
             session_count += 1
             table_id = f"Table_{session_count}"
+            sb, bb, target_players = self._sample_table_config()
+            min_session_hands = min(20, hands_per_session, num_hands_to_play - hands_generated)
+            max_session_hands = min(hands_per_session, num_hands_to_play - hands_generated)
             session = TableSession(
                 table_id=table_id,
-                sb=self.sb,
-                bb=self.bb,
+                sb=sb,
+                bb=bb,
                 max_seats=self.max_seats,
                 rake_rate=self.rake_rate,
-                bot_profiles=bot_profiles
+                bot_profiles=bot_profiles,
+                target_player_count=target_players,
+                rng=self.rng,
             )
             session.initialize_table()
-            session_length = min(random.randint(20, hands_per_session), num_hands_to_play - hands_generated)
+            session_length = self.rng.randint(min_session_hands, max_session_hands)
             
-            print(f"Session {session_count}: {table_id} ({session_length} hands)")
+            print(
+                f"Session {session_count}: {table_id} ({session_length} hands) | "
+                f"stakes {sb:.2f}/{bb:.2f} | target_players {target_players}"
+            )
             
             for hand_in_session in range(session_length):
                 hand = self._generate_single_hand(session)
                 if hand:
                     all_hands.append(hand)
                     hands_generated += 1
-                    if hands_generated % 100 == 0:
-                        print(f"  Generated {hands_generated}/{num_hands_to_play} hands...")
+            if hands_generated % 100 == 0:
+                print(f"  Generated {hands_generated}/{num_hands_to_play} hands...")
                 
                 session.rotate_button()
                 if 0 < hand_in_session < session_length - 1:
@@ -202,7 +381,7 @@ class PokerHandGenerator:
         # RANDOMLY SELECT subset
         if num_hands_to_select < len(all_hands):
             print(f"\n=== Randomly selecting {num_hands_to_select} from {len(all_hands)} hands ===")
-            selected_hands = random.sample(all_hands, num_hands_to_select)
+            selected_hands = self.rng.sample(all_hands, num_hands_to_select)
         else:
             selected_hands = all_hands
         
@@ -252,7 +431,7 @@ class PokerHandGenerator:
 
         hero = session.players[hero_idx]
         if hero.stack <= 0:
-            hero.stack = round(random.uniform(8.0, 12.0), 2)
+            hero.stack = session._sample_stack()
 
         # Remove busted NON-hero players before starting the hand
         for idx, player in enumerate(session.players):
@@ -666,6 +845,8 @@ class PokerHandGenerator:
         # Canonicalize so button is always seat 1 (match human data rotation)
         hand = self._rotate_to_button_one(hand)
         hand = self._contiguize_seats(hand)
+        if not self._hand_is_consistent(hand):
+            return None
         return hand
 
     def _rotate_to_button_one(self, hand: Dict[str, Any]) -> Dict[str, Any]:
