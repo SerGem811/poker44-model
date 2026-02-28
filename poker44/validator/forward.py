@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import traceback
 import time
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, Tuple
 
 import bittensor as bt
 import numpy as np
@@ -14,7 +14,13 @@ import numpy as np
 from poker44.score.scoring import reward
 from poker44.validator.synapse import DetectionSynapse
 
-from poker44.validator.constants import BURN_EMISSIONS, BURN_FRACTION, KEEP_FRACTION, UID_ZERO
+from poker44.validator.constants import (
+    BURN_EMISSIONS,
+    BURN_FRACTION,
+    KEEP_FRACTION,
+    UID_ZERO,
+    WINNER_TAKE_ALL,
+)
 
 
 async def forward(validator) -> None:
@@ -40,9 +46,13 @@ async def _run_forward_cycle(validator) -> None:
         await asyncio.sleep(validator.poll_interval)
         return
     
-    axons = validator.metagraph.axons
-    miner_uids = list(range(len(axons)))
+    miner_uids, axons = _get_candidate_miners(validator)
     responses: Dict[int, List[float]] = {uid: [] for uid in miner_uids}
+
+    if not miner_uids:
+        bt.logging.info("No eligible miner UIDs available for this cycle.")
+        await asyncio.sleep(validator.poll_interval)
+        return
     
     # Prepare chunks and labels
     chunks = []  # List of batches (each batch is a list of hand dicts)
@@ -148,12 +158,31 @@ async def _run_forward_cycle(validator) -> None:
         return
     
     rewards_array, metrics = _compute_windowed_rewards(validator, miner_uids)
-    validator.update_scores(rewards_array, miner_uids)
-    bt.logging.info("Rewards issued for %d miners.", len(rewards_array))
+    reward_map = dict(zip(miner_uids, rewards_array.tolist()))
+    winner_uids, winner_rewards = _select_weight_targets(reward_map)
+
+    validator.update_scores(winner_rewards, winner_uids)
+    bt.logging.info("Rewards issued for %d UID(s).", len(winner_rewards))
     bt.logging.info(
         f"[Forward #{validator.forward_count}] complete. Sleeping {validator.poll_interval}s before next tick.",
     )
     await asyncio.sleep(validator.poll_interval)
+
+
+def _get_candidate_miners(validator) -> Tuple[List[int], List]:
+    miner_uids: List[int] = []
+    axons: List = []
+
+    for uid, axon in enumerate(validator.metagraph.axons):
+        if uid == UID_ZERO:
+            continue
+        if bool(validator.metagraph.validator_permit[uid]):
+            continue
+        miner_uids.append(uid)
+        axons.append(axon)
+
+    bt.logging.info("Eligible miners this cycle: %s", miner_uids)
+    return miner_uids, axons
 
 
 def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndarray, list]:
@@ -167,37 +196,59 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
 
         if len(pred_buf) < window or len(label_buf) < window:
             rewards.append(0.0)
-            metrics.append({"fp_score": 0, "f1_score": 0, "ap_score": 0, "penalty": 0})
+            metrics.append(
+                {
+                    "fpr": 1.0,
+                    "bot_recall": 0.0,
+                    "ap_score": 0.0,
+                    "human_safety_penalty": 0.0,
+                    "base_score": 0.0,
+                    "reward": 0.0,
+                }
+            )
             continue
 
         preds_window = np.asarray(pred_buf[-window:], dtype=float)
         labels_window = np.asarray(label_buf[-window:], dtype=bool)
         rew, metric = reward(preds_window, labels_window)
-        metric["penalty"] = 1.0
         rewards.append(rew)
         metrics.append(metric)
 
     rewards_array = np.asarray(rewards, dtype=np.float32)
     
-    # **95% BURN TO UID 0**: Redistribute weights
-    if BURN_EMISSIONS:
-        if len(rewards_array) > 0:
-            # Normalize rewards to sum to 1
-            total_reward = np.sum(rewards_array)
-            if total_reward > 0:
-                normalized_rewards = rewards_array / total_reward
-            else:
-                normalized_rewards = np.ones_like(rewards_array) / len(rewards_array)
-            
-            # Allocate 95% to UID 0, 5% distributed among all miners by their performance
-            burned_rewards = normalized_rewards * KEEP_FRACTION  # Scale everyone down to 5%
-            burned_rewards[UID_ZERO] = BURN_FRACTION  # Give 95% to UID 0
-            
-            bt.logging.info(f"95% burn applied: UID 0 gets {burned_rewards[0]:.4f}, others share {1-burned_rewards[0]:.4f}")
-            
-            return burned_rewards, metrics
-    
     return rewards_array, metrics
+
+
+def _select_weight_targets(reward_map: Dict[int, float]) -> tuple[List[int], np.ndarray]:
+    if not reward_map:
+        bt.logging.info("No eligible rewards computed; assigning 100%% to UID 0.")
+        return [UID_ZERO], np.asarray([1.0], dtype=np.float32)
+
+    sorted_rewards = sorted(reward_map.items(), key=lambda item: (-item[1], item[0]))
+    winner_uid, winner_reward = sorted_rewards[0]
+
+    if not WINNER_TAKE_ALL:
+        uids = [uid for uid, _ in sorted_rewards]
+        rewards = np.asarray([reward for _, reward in sorted_rewards], dtype=np.float32)
+        return uids, rewards
+
+    if winner_reward <= 0.0:
+        bt.logging.info("No miner achieved positive reward; assigning 100%% to UID 0.")
+        return [UID_ZERO], np.asarray([1.0], dtype=np.float32)
+
+    if BURN_EMISSIONS:
+        bt.logging.info(
+            "Winner-take-all burn enabled: UID 0 gets %.2f%%, winner UID %s gets %.2f%%.",
+            BURN_FRACTION * 100,
+            winner_uid,
+            KEEP_FRACTION * 100,
+        )
+        return [UID_ZERO, winner_uid], np.asarray(
+            [BURN_FRACTION, KEEP_FRACTION], dtype=np.float32
+        )
+
+    bt.logging.info("Winner-take-all enabled: winner UID %s gets 100%%.", winner_uid)
+    return [winner_uid], np.asarray([1.0], dtype=np.float32)
 
 async def _dendrite_with_retries(
     dendrite: bt.dendrite,

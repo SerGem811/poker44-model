@@ -90,6 +90,7 @@ class Validator(BaseValidatorNeuron):
             f"ratio={human_ratio} refresh_s={refresh_seconds}"
         )
         self.poll_interval = self.settings.poll_interval_seconds
+        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "50"))
         self.prediction_buffer = {}
         self.label_buffer = {}
 
