@@ -16,6 +16,7 @@
 # DEALINGS IN THE SOFTWARE.
 
 import copy
+import os
 import bittensor as bt
 from abc import ABC, abstractmethod
 
@@ -211,13 +212,23 @@ class BaseNeuron(ABC):
 
     def parse_versions(self):
         self.version = __version__
+        remote_check_enabled = (
+            os.getenv("POKER44_ENABLE_REMOTE_VERSION_CHECK", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+
+        if not remote_check_enabled:
+            bt.logging.info("Remote version check disabled; using local package version.")
+            return
 
         bt.logging.info("Parsing versions...")
-        response = requests.get(version_url)
-        bt.logging.info(f"Response: {response.status_code}")
-        if response.status_code == 200:
-            content = response.text
+        try:
+            response = requests.get(version_url, timeout=2.0)
+            bt.logging.info(f"Response: {response.status_code}")
+            if response.status_code != 200:
+                return
 
+            content = response.text
             version_pattern = r"__version__\s*=\s*['\"]([^'\"]+)['\"]"
 
             try:
@@ -227,4 +238,6 @@ class BaseNeuron(ABC):
                 return
 
             self.version = version
+        except Exception as e:
+            bt.logging.warning(f"Remote version check failed: {e}")
         return

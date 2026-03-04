@@ -74,6 +74,7 @@ class Validator(BaseValidatorNeuron):
         human_ratio = float(os.getenv("POKER44_HUMAN_RATIO", "0.5"))
         dataset_seed_env = os.getenv("POKER44_DATASET_SEED")
         dataset_seed = int(dataset_seed_env) if dataset_seed_env is not None else None
+        validator_secret_key = os.getenv("POKER44_VALIDATOR_SECRET_KEY")
 
         self.chunk_batch_size = chunk_count
         self.dataset_cfg = MixedDatasetConfig(
@@ -85,12 +86,18 @@ class Validator(BaseValidatorNeuron):
             human_ratio=human_ratio,
             refresh_seconds=refresh_seconds,
             seed=dataset_seed,
+            validator_secret_key=validator_secret_key,
         )
         self.provider = TimedMixedDatasetProvider(self.dataset_cfg)
         bt.logging.info(
             f"📁 Using mixed dataset provider | human_json={human_json_path} output={mixed_output_path} "
             f"chunks={chunk_count} hands_range=[{min_hands_per_chunk},{max_hands_per_chunk}] "
             f"ratio={human_ratio} refresh_s={refresh_seconds}"
+        )
+        if validator_secret_key:
+            bt.logging.info("🔐 Synchronized validator seed enabled via shared secret key.")
+        bt.logging.info(
+            "🧭 Dataset generation is deterministic per refresh window across honest validators."
         )
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(refresh_seconds))
