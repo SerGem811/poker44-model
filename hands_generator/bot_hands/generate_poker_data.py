@@ -1,20 +1,17 @@
-import json
-import random
-import hashlib
 import copy
 import gzip
-from datetime import datetime
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+import hashlib
+import json
+import random
 import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 from hands_generator.bot_hands.sandbox_poker_bot import SandboxPokerBot, BotProfile, GameState, LegalActions, Street, ActionType, BotDecision
 from poker44.core.hand_json import V0_JSON_HAND
 
-# Fixed seed for reproducibility
-CURRENT_DATE = str(datetime.now())
-SALT = f"poker_anonymizer_2025_secret_salt_change_me {CURRENT_DATE}"
-BOT_RNG_SEED = int(hashlib.sha256(SALT.encode()).hexdigest(), 16) % 1000001
+# Fixed base seed for reproducibility across validators.
+BOT_RNG_SEED = 424242
 HERO_UID = f"p_{hashlib.sha256('hero_player_fixed_2025_secret'.encode()).hexdigest()}"
 PUBLIC_HUMAN_HANDS_PATH = Path(__file__).resolve().parents[1] / "human_hands" / "poker_hands_combined.json.gz"
 DEFAULT_STAKE_DISTRIBUTION: List[Tuple[float, float, int]] = [
@@ -252,8 +249,10 @@ class PokerHandGenerator:
         max_seats=6,
         rake_rate=0.05,
         reference_hands: Optional[List[Dict[str, Any]]] = None,
+        seed: Optional[int] = None,
     ):
-        self.rng = random.Random(BOT_RNG_SEED)
+        self.seed = BOT_RNG_SEED if seed is None else seed
+        self.rng = random.Random(self.seed)
         self.sb = sb
         self.bb = bb
         self.max_seats = max_seats
@@ -394,7 +393,7 @@ class PokerHandGenerator:
     def _create_shuffled_deck(self) -> List[str]:
         """Create a fresh 52-card deck and shuffle it."""
         deck = [f"{rank}{suit}" for rank in self.ranks for suit in self.suits]
-        random.shuffle(deck)
+        self.rng.shuffle(deck)
         return deck
 
     def _deal_cards(self, num: int, deck: Optional[List[str]] = None) -> List[str]:
@@ -409,8 +408,8 @@ class PokerHandGenerator:
 
         cards = []
         for _ in range(num):
-            rank = random.choice(self.ranks)
-            suit = random.choice(self.suits)
+            rank = self.rng.choice(self.ranks)
+            suit = self.rng.choice(self.suits)
             cards.append(f"{rank}{suit}")
         return cards
 
@@ -418,15 +417,17 @@ class PokerHandGenerator:
         # Ensure hero exists and has chips (no hero → no hand)
         hero_idx = session.hero_seat - 1 if session.hero_seat else 0
         if session.players[hero_idx] is None:
-            hero_profile = random.choice(session.bot_profiles)
+            hero_profile = self.rng.choice(session.bot_profiles)
             hero_player = Player(
                 uid=HERO_UID,
                 seat=session.hero_seat or 1,
-                stack=round(random.uniform(8.0, 12.0), 2),
+                stack=round(self.rng.uniform(8.0, 12.0), 2),
                 is_bot=True,
                 hands_played=0,
             )
-            hero_player.bot_instance = SandboxPokerBot(hero_profile, rng_seed=BOT_RNG_SEED)
+            hero_player.bot_instance = SandboxPokerBot(
+                hero_profile, rng_seed=self.rng.randint(0, 10**9)
+            )
             session.players[hero_idx] = hero_player
 
         hero = session.players[hero_idx]
@@ -446,7 +447,7 @@ class PokerHandGenerator:
         
         deck = self._create_shuffled_deck()
         
-        self.hand_counter += random.randint(1, 100)
+        self.hand_counter += self.rng.randint(1, 100)
         hand_id = str(self.hand_counter)
         session.hand_number += 1
         
@@ -784,7 +785,7 @@ class PokerHandGenerator:
         still_in = [p for p in players if not p.folded]
         showdown = len(still_in) > 1
         if showdown:
-            winner = random.choice(still_in)
+            winner = self.rng.choice(still_in)
             reason = "showdown"
         else:
             winner = still_in[0]

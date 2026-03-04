@@ -36,14 +36,14 @@ btcli wallet new_hotkey  --wallet.name my_cold --wallet.hotkey my_poker44_hotkey
 
 ---
 
-### Register on Subnet 87
+### Register on Subnet 126
 
 ```bash
 # Register your miner on Poker44 subnet
 btcli subnet register \
   --wallet.name my_cold \
   --wallet.hotkey my_poker44_hotkey \
-  --netuid 87 \
+  --netuid 126 \
   --subtensor.network finney
 
 # Check registration status

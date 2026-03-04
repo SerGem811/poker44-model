@@ -4,8 +4,7 @@ Welcome to Poker44 – the poker anti-bot subnet with objective, evolving
 evaluation. This guide covers the lean validator scaffold introduced in v0.
 
 > **Goal for v0:** fetch labeled hands from Poker44, query miners, score
-> them with F1-centric rewards, and log results. On-chain publishing and
-> attestations follow in the next milestone.
+> them with average-precision/bot-recall rewards, and publish weights on-chain.
 
 ---
 
@@ -32,21 +31,28 @@ evaluation, each validator must have a separate private local human-hand JSON
 and point `POKER44_HUMAN_JSON_PATH` at that file. Bot hands are created on the
 fly during validator dataset construction. No manual player list is required;
 the validator builds labeled human/bot chunks internally.
+Set the same `POKER44_VALIDATOR_SECRET_KEY` across honest validators so every
+validator derives the same synchronized seed per window and therefore selects
+the same human-hand slice and generates the same mixed dataset for that window.
 
 By default, the validator refreshes its dataset and queries miners once every
 12 hours. The same cadence is used for dataset rotation and miner evaluation
 unless you override it explicitly.
 
+Within each 12-hour window, honest validators generate the same mixed dataset
+from the same private human corpus and the same code path. The dataset changes
+only when the next window begins.
+
 ---
 
-### Register on Subnet 87
+### Register on Subnet 126
 
 ```bash
 # Register your validator on Poker44 subnet
 btcli subnet register \
   --wallet.name p44_cold \
   --wallet.hotkey p44_validator \
-  --netuid 87 \
+  --netuid 126 \
   --subtensor.network finney
 
 # Check registration status
@@ -65,9 +71,10 @@ at startup.
 
 ```bash
 POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
+POKER44_VALIDATOR_SECRET_KEY=shared-secret-for-sn126 \
 pm2 start python --name poker44_validator -- \
   ./neurons/validator.py \
-  --netuid 87 \
+  --netuid 126 \
   --wallet.name p44_cold \
   --wallet.hotkey p44_validator \
   --subtensor.network finney \
@@ -78,9 +85,10 @@ Example with explicit private human corpus:
 
 ```bash
 POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
+POKER44_VALIDATOR_SECRET_KEY=shared-secret-for-sn126 \
 pm2 start python --name poker44_validator -- \
   ./neurons/validator.py \
-  --netuid 87 \
+  --netuid 126 \
   --wallet.name p44_cold \
   --wallet.hotkey p44_validator \
   --subtensor.network finney \
@@ -130,7 +138,8 @@ The script currently sleeps for 12 hours between evaluation cycles by default.
 ## 🧭 Road to full validator
 
 - ✅ Poker44 ingestion + heuristic scoring loop
-- ⏳ Persist receipts + publish weights on-chain
+- ✅ Publish weights on-chain
+- ⏳ Persist receipts / attestations
 - ⏳ Held-out bot families + early-detection challenges
 - ⏳ Dashboarding and operator-facing APIs
 
