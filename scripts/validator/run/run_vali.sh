@@ -2,13 +2,14 @@
 
 # Poker44 Validator Startup Script
 
-NETUID=294  ## 87 if mainnet, 294 if testnet
+NETUID=126
 WALLET_NAME="poker44-test-ck"
 HOTKEY="poker44-hk"
-NETWORK="test"  ## "finney" for mainnet; "test" for testnet
+NETWORK="finney"
 VALIDATOR_SCRIPT="./neurons/validator.py"
 PM2_NAME="poker44_validator"  ##  name of validator, as you wish
 POKER44_HUMAN_JSON_PATH="/path/to/private/poker_data_combined.json"
+POKER44_VALIDATOR_SECRET_KEY="shared-secret-for-sn126"
 
 if [ ! -f "$VALIDATOR_SCRIPT" ]; then
     echo "Error: Validator script not found at $VALIDATOR_SCRIPT"
@@ -28,8 +29,9 @@ fi
 
 pm2 delete $PM2_NAME 2>/dev/null || true
 
-export PYTHONPATH="/root/Poker44-subnet"
+export PYTHONPATH="$(pwd)"
 export POKER44_HUMAN_JSON_PATH="$POKER44_HUMAN_JSON_PATH"
+export POKER44_VALIDATOR_SECRET_KEY="$POKER44_VALIDATOR_SECRET_KEY"
 
 pm2 start $VALIDATOR_SCRIPT \
   --name $PM2_NAME -- \

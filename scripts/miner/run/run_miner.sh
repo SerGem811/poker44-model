@@ -2,10 +2,10 @@
 
 # Poker44 Miner Startup Script
 
-NETUID=294  ## 87 if mainnet, 294 if testnet
+NETUID=126
 WALLET_NAME="poker44-miner-ck"
 HOTKEY="poker44-miner-hk"
-NETWORK="test"  ## "finney" for mainnet; "test" for testnet
+NETWORK="finney"
 MINER_SCRIPT="./neurons/miner.py"
 PM2_NAME="poker44_miner"  ##  name of Miner, as you wish
 
@@ -21,7 +21,7 @@ fi
 
 pm2 delete $PM2_NAME 2>/dev/null || true
 
-export PYTHONPATH="/root/Poker44-subnet"
+export PYTHONPATH="$(pwd)"
 
 pm2 start $MINER_SCRIPT \
   --name $PM2_NAME -- \

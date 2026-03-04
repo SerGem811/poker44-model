@@ -19,7 +19,7 @@ def add_args(cls, parser: argparse.ArgumentParser) -> None:
     bt.Wallet.add_args(parser)
     bt.Axon.add_args(parser)
     
-    parser.add_argument("--netuid", type=int, help="Subnet netuid", default=1)
+    parser.add_argument("--netuid", type=int, help="Subnet netuid", default=126)
     
     parser.add_argument(
         "--neuron.device",
@@ -69,7 +69,7 @@ def add_args(cls, parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--blacklist.allow_non_registered",
-        action="store_false",
+        action="store_true",
         default=False,
         help="Allow requests from non-registered entities.",
     )
