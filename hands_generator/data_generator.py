@@ -72,8 +72,9 @@ def generate_bot_chunk(
     size: int,
     profiles: List[BotProfile],
     reference_hands: Optional[List[Dict[str, Any]]] = None,
+    seed: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    generator = PokerHandGenerator(reference_hands=reference_hands)
+    generator = PokerHandGenerator(reference_hands=reference_hands, seed=seed)
     sb, bb, target_players = generator._sample_table_config()
     session = TableSession(
         table_id="Generated",
@@ -142,7 +143,7 @@ def build_random_dataset_with_labels(
             hands = sample_human_chunk(human_hands, chunk_size, rng)
             labeled_chunks.append({"hands": hands, "is_bot": False})
         else:
-            hands = generate_bot_chunk(chunk_size, bot_profiles)
+            hands = generate_bot_chunk(chunk_size, bot_profiles, seed=rng.randint(0, 10**9))
             labeled_chunks.append({"hands": hands, "is_bot": True})
             
 
