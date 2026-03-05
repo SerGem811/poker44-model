@@ -117,6 +117,9 @@ python3 hands_generator/bot_hands/generate_poker_data.py
 
 This writes `hands_generator/bot_hands/bot_hands.json`, which you can combine
 with the public human corpus however you want for training.
+The generator also reads `hands_generator/bot_hands/hole_strengths.csv` as a
+preflop strength lookup table. If the CSV is missing, generation still runs
+with fallback heuristics.
 
 ### What arrives in each request?
 
