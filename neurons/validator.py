@@ -66,7 +66,7 @@ class Validator(BaseValidatorNeuron):
             os.getenv("POKER44_MIXED_DATASET_PATH", str(DEFAULT_OUTPUT_PATH))
         ).expanduser().resolve()
         refresh_seconds = int(
-            os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(12 * 60 * 60))
+            os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60))
         )
         chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "80"))
         min_hands_per_chunk = int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))

@@ -7,4 +7,4 @@ KEEP_FRACTION = 1.0 - BURN_FRACTION  # Fraction of emissions to distribute
 UID_ZERO = 0                       # UID representing the burn address
 
 # Reward distribution mechanism
-WINNER_TAKE_ALL = True             # Only the top miner receives non-zero emissions
+WINNER_TAKE_ALL = False            # Distribute emissions proportionally across eligible miners
