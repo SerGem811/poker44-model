@@ -228,9 +228,42 @@ def _select_weight_targets(reward_map: Dict[int, float]) -> tuple[List[int], np.
     winner_uid, winner_reward = sorted_rewards[0]
 
     if not WINNER_TAKE_ALL:
-        uids = [uid for uid, _ in sorted_rewards]
-        rewards = np.asarray([reward for _, reward in sorted_rewards], dtype=np.float32)
-        return uids, rewards
+        positive = [(uid, max(0.0, float(reward))) for uid, reward in sorted_rewards]
+        positive = [(uid, reward) for uid, reward in positive if reward > 0.0]
+
+        if not positive:
+            bt.logging.info(
+                "No miner achieved positive reward; assigning 100%% to UID 0."
+            )
+            return [UID_ZERO], np.asarray([1.0], dtype=np.float32)
+
+        total_positive = float(sum(reward for _, reward in positive))
+        if total_positive <= 0.0:
+            bt.logging.info(
+                "Positive-reward sum is zero; assigning 100%% to UID 0."
+            )
+            return [UID_ZERO], np.asarray([1.0], dtype=np.float32)
+
+        norm = [(uid, reward / total_positive) for uid, reward in positive]
+
+        if BURN_EMISSIONS:
+            uids = [UID_ZERO] + [uid for uid, _ in norm]
+            rewards = [BURN_FRACTION] + [KEEP_FRACTION * frac for _, frac in norm]
+            bt.logging.info(
+                "Proportional mode + burn: UID 0 gets %.2f%%, %.2f%% split across %d miner(s).",
+                BURN_FRACTION * 100,
+                KEEP_FRACTION * 100,
+                len(norm),
+            )
+            return uids, np.asarray(rewards, dtype=np.float32)
+
+        uids = [uid for uid, _ in norm]
+        rewards = [frac for _, frac in norm]
+        bt.logging.info(
+            "Proportional mode: 100%% split across %d miner(s).",
+            len(norm),
+        )
+        return uids, np.asarray(rewards, dtype=np.float32)
 
     if winner_reward <= 0.0:
         bt.logging.info("No miner achieved positive reward; assigning 100%% to UID 0.")
