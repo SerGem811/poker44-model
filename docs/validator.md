@@ -36,10 +36,10 @@ validator derives the same synchronized seed per window and therefore selects
 the same human-hand slice and generates the same mixed dataset for that window.
 
 By default, the validator refreshes its dataset and queries miners once every
-12 hours. The same cadence is used for dataset rotation and miner evaluation
+1 hour. The same cadence is used for dataset rotation and miner evaluation
 unless you override it explicitly.
 
-Within each 12-hour window, honest validators generate the same mixed dataset
+Within each 1-hour window, honest validators generate the same mixed dataset
 from the same private human corpus and the same code path. The dataset changes
 only when the next window begins.
 
@@ -131,7 +131,7 @@ What happens each cycle:
    97% to UID 0 and 3% to the single top-scoring eligible miner. If no miner
    achieves a positive score, 100% goes to UID 0 for that cycle.
 
-The script currently sleeps for 12 hours between evaluation cycles by default.
+The script currently sleeps for 1 hour between evaluation cycles by default.
 
 ---
 
