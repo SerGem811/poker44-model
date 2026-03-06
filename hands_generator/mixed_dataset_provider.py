@@ -31,7 +31,7 @@ class MixedDatasetConfig:
     min_hands_per_chunk: int = 60
     max_hands_per_chunk: int = 120
     human_ratio: float = 0.5
-    refresh_seconds: int = 12 * 60 * 60
+    refresh_seconds: int = 60 * 60
     seed: Optional[int] = None
     validator_secret_key: Optional[str] = None
 
