@@ -13,6 +13,15 @@ evaluation. This guide covers the lean validator scaffold introduced in v0.
 - Ubuntu 22.04+ (or any Linux with Python 3.10-3.12 available)
 - Python 3.10-3.12
 
+## 🔒 Production Preconditions
+
+- Validator and miner hotkeys must be registered on netuid `126`.
+- Miners enforce validator-only access by default (`blacklist.force_validator_permit=true`).
+  In production, validator hotkeys querying miners are expected to satisfy network permit requirements.
+- Validators must use a private local human-hand JSON via `POKER44_HUMAN_JSON_PATH`.
+- Honest validators must share the same `POKER44_VALIDATOR_SECRET_KEY` to keep deterministic
+  window-aligned dataset generation.
+
 ---
 
 ## 🛠️ Install
@@ -132,10 +141,26 @@ What happens each cycle:
    reward. If no miner achieves a positive score, 100% goes to UID 0 for that
    cycle.
 
-For local debugging only, you may restrict validator queries to specific miners:
-`POKER44_TARGET_MINER_UIDS=163,165`.
-
 The script currently sleeps for 1 hour between evaluation cycles by default.
+
+## ⛓️ Weight-Setting Cadence
+
+Weights are constrained by chain timing rules. If set too frequently, the chain
+may reject updates with a message equivalent to "too soon to set weights".
+
+Production recommendation:
+
+- Keep validator cadence and epoch configuration conservative and stable.
+- Do not force ultra-short epochs in production.
+- Treat successful, periodic `set_weights` inclusion as the source of truth.
+
+## ✅ Production Health Checklist
+
+- Validator reaches forward cycles and logs eligible miner UIDs.
+- Miners return valid `risk_scores` arrays (not empty responses).
+- Reward logs show burn+proportional assignment behavior.
+- Validator logs include successful weight publication on chain:
+  `set_weights on chain successfully!`
 
 ---
 
