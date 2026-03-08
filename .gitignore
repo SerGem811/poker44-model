@@ -148,6 +148,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv312/
 env/
 venv/
 ENV/
@@ -200,6 +201,7 @@ scripts/miner/install_dependencies.sh
 scripts/validator/main/install_dependencies.sh
 testing/
 data/mongodb_data/
+data/validator_mixed_chunks.json
 openClutch_venv/
 prueba.dem.zst
 prueba.dem.zst:Zone.Identifier
