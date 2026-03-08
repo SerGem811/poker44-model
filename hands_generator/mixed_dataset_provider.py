@@ -87,13 +87,6 @@ def _window_human_sizes(
     )
 
 
-def _cumulative_human_offset(cfg: MixedDatasetConfig, window_id: int) -> int:
-    offset = 0
-    for historical_window_id in range(window_id):
-        offset += sum(_window_human_sizes(cfg, historical_window_id))
-    return offset
-
-
 def _iter_top_level_array_objects(path: Path, chunk_size: int = 1024 * 1024) -> Iterator[str]:
     """Yield object JSON strings from a top-level JSON array without loading the whole file."""
     if path.suffix != ".gz":
@@ -229,7 +222,10 @@ def _deterministic_human_selection(
         ).hexdigest(),
     )
 
-    offset = _cumulative_human_offset(cfg, window_id) % len(ordered_hands)
+    offset_digest = hashlib.sha256(
+        f"{secret}:window:{window_id}".encode("utf-8")
+    ).hexdigest()
+    offset = int(offset_digest[:16], 16) % len(ordered_hands)
     selected: List[Dict[str, Any]] = []
     for index in range(sample_size):
         selected.append(ordered_hands[(offset + index) % len(ordered_hands)])

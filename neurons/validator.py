@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -117,7 +116,5 @@ class Validator(BaseValidatorNeuron):
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution
-    with Validator() as validator:
-        while True:
-            bt.logging.info(f"Validator running... {time.time()}")
-            time.sleep(100)
+    validator = Validator()
+    validator.run()

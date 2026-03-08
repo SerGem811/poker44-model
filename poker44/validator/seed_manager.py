@@ -44,10 +44,7 @@ class SynchronizedSeedManager:
         if self._last_window_start != window_start:
             self._last_window_start = window_start
             bt.logging.info(
-                "New seed window: %s-%s UTC | Seed: %s",
-                window_start.strftime("%H:%M"),
-                window_end.strftime("%H:%M"),
-                seed,
+                f"New seed window: {window_start.strftime('%H:%M')}-{window_end.strftime('%H:%M')} UTC | Seed: {seed}"
             )
 
         return seed, window_start, window_end

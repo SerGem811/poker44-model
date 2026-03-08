@@ -10,8 +10,8 @@ evaluation. This guide covers the lean validator scaffold introduced in v0.
 
 ## ✅ Requirements
 
-- Ubuntu 22.04+ (or any Linux with Python 3.10/3.11 available)
-- Python 3.10+
+- Ubuntu 22.04+ (or any Linux with Python 3.10-3.12 available)
+- Python 3.10-3.12
 
 ---
 
@@ -127,9 +127,13 @@ What happens each cycle:
 2. A batch is generated consisting of a single hand type & multiple batches are used to create a chunk.
 3. Chunks are dispatched to miners; responses are scored with average precision,
    bot recall, and a hard false-positive penalty on humans.
-4. Rewards are logged and used to update weights with a winner-take-all policy:
-   97% to UID 0 and 3% to the single top-scoring eligible miner. If no miner
-   achieves a positive score, 100% goes to UID 0 for that cycle.
+4. Rewards are logged and used to update weights with a burn+proportional policy:
+   97% to UID 0 and 3% split proportionally across eligible miners with positive
+   reward. If no miner achieves a positive score, 100% goes to UID 0 for that
+   cycle.
+
+For local debugging only, you may restrict validator queries to specific miners:
+`POKER44_TARGET_MINER_UIDS=163,165`.
 
 The script currently sleeps for 1 hour between evaluation cycles by default.
 

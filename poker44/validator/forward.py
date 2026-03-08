@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import traceback
 import time
 from typing import Dict, List, Sequence, Tuple
@@ -28,7 +29,7 @@ async def forward(validator) -> None:
     try:
         await _run_forward_cycle(validator)
     except Exception:
-        bt.logging.error("Unexpected error in forward cycle:\n%s", traceback.format_exc())
+        bt.logging.error(f"Unexpected error in forward cycle:\n{traceback.format_exc()}")
 
 
 async def _run_forward_cycle(validator) -> None:
@@ -162,7 +163,7 @@ async def _run_forward_cycle(validator) -> None:
     winner_uids, winner_rewards = _select_weight_targets(reward_map)
 
     validator.update_scores(winner_rewards, winner_uids)
-    bt.logging.info("Rewards issued for %d UID(s).", len(winner_rewards))
+    bt.logging.info(f"Rewards issued for {len(winner_rewards)} UID(s).")
     bt.logging.info(
         f"[Forward #{validator.forward_count}] complete. Sleeping {validator.poll_interval}s before next tick.",
     )
@@ -172,16 +173,37 @@ async def _run_forward_cycle(validator) -> None:
 def _get_candidate_miners(validator) -> Tuple[List[int], List]:
     miner_uids: List[int] = []
     axons: List = []
+    target_uids_env = os.getenv("POKER44_TARGET_MINER_UIDS", "").strip()
+    target_uids = None
+    if target_uids_env:
+        try:
+            target_uids = {
+                int(uid.strip())
+                for uid in target_uids_env.split(",")
+                if uid.strip() != ""
+            }
+            bt.logging.info(f"Restricting miner queries to target UIDs: {sorted(target_uids)}")
+        except ValueError:
+            bt.logging.warning(
+                f"Invalid POKER44_TARGET_MINER_UIDS={target_uids_env!r}; ignoring filter."
+            )
+            target_uids = None
 
     for uid, axon in enumerate(validator.metagraph.axons):
         if uid == UID_ZERO:
             continue
+        if target_uids is not None and uid not in target_uids:
+            continue
         if bool(validator.metagraph.validator_permit[uid]):
+            continue
+        ip = str(getattr(axon, "ip", "") or "")
+        port = int(getattr(axon, "port", 0) or 0)
+        if ip in {"", "0.0.0.0", "::", "[::]"} or port <= 0:
             continue
         miner_uids.append(uid)
         axons.append(axon)
 
-    bt.logging.info("Eligible miners this cycle: %s", miner_uids)
+    bt.logging.info(f"Eligible miners this cycle: {miner_uids}")
     return miner_uids, axons
 
 
@@ -250,19 +272,14 @@ def _select_weight_targets(reward_map: Dict[int, float]) -> tuple[List[int], np.
             uids = [UID_ZERO] + [uid for uid, _ in norm]
             rewards = [BURN_FRACTION] + [KEEP_FRACTION * frac for _, frac in norm]
             bt.logging.info(
-                "Proportional mode + burn: UID 0 gets %.2f%%, %.2f%% split across %d miner(s).",
-                BURN_FRACTION * 100,
-                KEEP_FRACTION * 100,
-                len(norm),
+                f"Proportional mode + burn: UID 0 gets {BURN_FRACTION * 100:.2f}%, "
+                f"{KEEP_FRACTION * 100:.2f}% split across {len(norm)} miner(s)."
             )
             return uids, np.asarray(rewards, dtype=np.float32)
 
         uids = [uid for uid, _ in norm]
         rewards = [frac for _, frac in norm]
-        bt.logging.info(
-            "Proportional mode: 100%% split across %d miner(s).",
-            len(norm),
-        )
+        bt.logging.info(f"Proportional mode: 100% split across {len(norm)} miner(s).")
         return uids, np.asarray(rewards, dtype=np.float32)
 
     if winner_reward <= 0.0:
@@ -271,16 +288,14 @@ def _select_weight_targets(reward_map: Dict[int, float]) -> tuple[List[int], np.
 
     if BURN_EMISSIONS:
         bt.logging.info(
-            "Winner-take-all burn enabled: UID 0 gets %.2f%%, winner UID %s gets %.2f%%.",
-            BURN_FRACTION * 100,
-            winner_uid,
-            KEEP_FRACTION * 100,
+            f"Winner-take-all burn enabled: UID 0 gets {BURN_FRACTION * 100:.2f}%, "
+            f"winner UID {winner_uid} gets {KEEP_FRACTION * 100:.2f}%."
         )
         return [UID_ZERO, winner_uid], np.asarray(
             [BURN_FRACTION, KEEP_FRACTION], dtype=np.float32
         )
 
-    bt.logging.info("Winner-take-all enabled: winner UID %s gets 100%%.", winner_uid)
+    bt.logging.info(f"Winner-take-all enabled: winner UID {winner_uid} gets 100%.")
     return [winner_uid], np.asarray([1.0], dtype=np.float32)
 
 async def _dendrite_with_retries(
@@ -306,5 +321,5 @@ async def _dendrite_with_retries(
             last_exc = exc
             bt.logging.warning(f"dendrite attempt {attempt}/{attempts} failed: {exc}")
             await asyncio.sleep(0.5)
-    bt.logging.error("dendrite retries exhausted: %s", last_exc)
+    bt.logging.error(f"dendrite retries exhausted: {last_exc}")
     return [None] * len(axons)
