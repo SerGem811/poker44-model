@@ -89,6 +89,18 @@ Keep the process running so validators can send canonical hand payloads to your
 axon. The reference miner ships with a simple heuristic model; swap in your own
 in `neurons/miner.py` for better scores.
 
+## 🔒 Production Access Policy
+
+By default, miners only accept requests from permitted validators
+(`blacklist.force_validator_permit=true`). This is the intended production
+posture.
+
+Operationally, this means:
+
+- your miner must stay online and reachable with valid axon metadata;
+- validators querying your miner must satisfy network permit requirements;
+- requests that fail permit checks or registration checks are rejected by design.
+
 ### Public training corpus
 
 The public repo includes a compressed human-hand corpus at:
@@ -145,6 +157,13 @@ indicate "bot".
    in each scoring window.
 3. **Generalise.** Datasets evolve with harder, more human-like bots. Models that
    adapt quickly keep their rewards as difficulty ramps.
+
+## ✅ Production Health Checklist
+
+- Miner is registered on netuid `126` and serving its axon consistently.
+- Validator queries are accepted and processed without forward exceptions.
+- Miner returns non-empty `risk_scores` with one score per chunk.
+- Validator-side logs show your UID in scored responses and weight allocation cycles.
 
 ---
 
