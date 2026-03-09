@@ -1,18 +1,10 @@
 # 🛠️ Poker44 Miner Guide
 
-Poker44 treats miners as bot-hunters: your job is to classify chunks, where each chunk contain multiple batches and each batches are made up of multiple poker hands and then
-return a bot classification result per batch. Validators curate labeled hands from a
-controlled poker environment & real human hands and reward miners who deliver
-accurate, low–false-positive predictions.
-
-This guide covers how to keep your miner hotkey active while you score hands and
-how validators translate your responses into on-chain incentives.
+This guide covers the production-facing miner flow for Poker44 subnet `126`.
 
 ---
 
-## 🚀 Quick start
-
-## 🛠️ Install
+## Install
 
 ```bash
 git clone https://github.com/Poker44/Poker44-subnet
@@ -24,153 +16,96 @@ pip install -e .
 
 ---
 
-## 🔐 Wallet prep
-
-Create keys ahead of time so you can register the minute miner incentives go
-live:
+## Wallet and Registration
 
 ```bash
 btcli wallet new_coldkey --wallet.name my_cold
-btcli wallet new_hotkey  --wallet.name my_cold --wallet.hotkey my_poker44_hotkey
-```
+btcli wallet new_hotkey --wallet.name my_cold --wallet.hotkey my_poker44_hotkey
 
----
-
-### Register on Subnet 126
-
-```bash
-# Register your miner on Poker44 subnet
 btcli subnet register \
   --wallet.name my_cold \
   --wallet.hotkey my_poker44_hotkey \
   --netuid 126 \
   --subtensor.network finney
 
-# Check registration status
-btcli wallet overview \
-   --wallet.name my_cold \
-   --subtensor.network finney
+btcli wallet overview --wallet.name my_cold --subtensor.network finney
 ```
 
 ---
 
----
+## Run Miner
 
-## ▶️ Run the loop
+Script path: `scripts/miner/run/run_miner.sh`
 
-#### Run miner using script
-You want to run it with the help of bash script;
-Script for running the miner is at `scripts/miner/run/run_miner.sh`
-
-- Update the hotkey, coldkey, name, network as needed
-- Make the script executable: `chmod + x ./scripts/miner/run/run_miner.sh`
-- Run the script: `./scripts/miner/run/run_miner.sh`
-
-
-
-#### Logs:
+```bash
+chmod +x ./scripts/miner/run/run_miner.sh
+./scripts/miner/run/run_miner.sh
 ```
+
+PM2:
+
+```bash
 pm2 logs poker44_miner
-```
-
-#### Stop / restart / delete:
-```
-pm2 stop poker44_miner
-
 pm2 restart poker44_miner
-
+pm2 stop poker44_miner
 pm2 delete poker44_miner
 ```
 
+---
+
+## Request/Response Contract
+
+Miners receive `DetectionSynapse(chunks=...)`, where:
+
+- `chunks` is a list of chunks.
+- each chunk is a list of hands.
+- return exactly one `risk_score` per chunk.
+
+Expected output fields:
+
+- `risk_scores: List[float]` in `[0, 1]`
+- `predictions: List[bool]` (optional but recommended)
+
+Important: validator payloads are sanitized to remove label/identity leakage before querying miners.
 
 ---
 
-Keep the process running so validators can send canonical hand payloads to your
-axon. The reference miner ships with a simple heuristic model; swap in your own
-in `neurons/miner.py` for better scores.
+## Production Access Policy
 
-## 🔒 Production Access Policy
+Miners should run with validator-only access enabled:
 
-By default, miners only accept requests from permitted validators
-(`blacklist.force_validator_permit=true`). This is the intended production
-posture.
+- `blacklist.force_validator_permit=true`
 
-Operationally, this means:
+Meaning:
 
-- your miner must stay online and reachable with valid axon metadata;
-- validators querying your miner must satisfy network permit requirements;
-- requests that fail permit checks or registration checks are rejected by design.
+- requests from non-permitted peers are rejected;
+- your miner must stay reachable and correctly served on-chain.
 
-### Public training corpus
+---
 
-The public repo includes a compressed human-hand corpus at:
+## Training Data (Miner Side)
+
+Public human corpus:
 
 `hands_generator/human_hands/poker_hands_combined.json.gz`
 
-This file is meant to be a starting point for miner training. Poker44 does not
-ship a public mixed human+bot training dataset. Instead, miners are expected to:
-
-1. Use the public human corpus as a base.
-2. Generate bot hands with the provided generator in `hands_generator/bot_hands/`.
-3. Build their own labels, features, balancing strategy, and training pipeline.
-
-This is intentional: the subnet rewards generalization, not memorization of a
-single public benchmark.
-
-This public human corpus is for miners. Validators should evaluate on a
-separate private local human dataset that is not distributed in the public repo.
-
-To generate a starter bot corpus locally:
+Bot generation:
 
 ```bash
-cd Poker44-subnet
 python3 hands_generator/bot_hands/generate_poker_data.py
 ```
 
-This writes `hands_generator/bot_hands/bot_hands.json`, which you can combine
-with the public human corpus however you want for training.
-The generator also reads `hands_generator/bot_hands/hole_strengths.csv` as a
-preflop strength lookup table. If the CSV is missing, generation still runs
-with fallback heuristics.
+Output:
 
-### What arrives in each request?
+`hands_generator/bot_hands/bot_hands.json`
 
-Validators send a `DetectionSynapse` containing:
-
-- **Event log:** ordered actions with amounts, street, stack and pot states.
-- **Timing:** decision windows and optional client latency buckets.
-- **Context:** table/game metadata (blinds, seat map, format flags).
-- **Integrity:** bot provenance tags (for bots), session multi-tabling buckets.
-
-Return a probability in `[0,1]` plus a binary guess; risk scores closer to 1
-indicate "bot".
+Validators evaluate with private human data (`POKER44_HUMAN_JSON_PATH`), not with the public training corpus.
 
 ---
 
-## 🧭 How miners earn now
+## Health Checklist
 
-1. **Serve your axon.** Keep your node online so validators can hit it with
-   hand-history queries.
-2. **Return calibrated bot-risk scores.** Miners are rewarded on average
-   precision, bot recall, and low false positives on humans. The miner allocation
-   pool is distributed proportionally across eligible miners with positive score
-   in each scoring window.
-3. **Generalise.** Datasets evolve with harder, more human-like bots. Models that
-   adapt quickly keep their rewards as difficulty ramps.
-
-## ✅ Production Health Checklist
-
-- Miner is registered on netuid `126` and serving its axon consistently.
-- Validator queries are accepted and processed without forward exceptions.
-- Miner returns non-empty `risk_scores` with one score per chunk.
-- Validator-side logs show your UID in scored responses and weight allocation cycles.
-
----
-
-## 🤝 Contribute ideas
-
-- Share new heuristics/features that help catch bots without harming humans.
-- Add adapters for new bot families or integrity signals.
-- Stress-test the scoring loop with adversarial patterns.
-
-Keep your node online, push better models, and help keep poker tables fair. 🂡
+- Miner hotkey registered on netuid `126`.
+- Axon served and visible on-chain.
+- Validator queries are accepted.
+- Miner returns non-empty `risk_scores` with correct chunk count.
