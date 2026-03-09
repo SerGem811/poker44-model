@@ -10,6 +10,14 @@
 
 ---
 
+## Official Links
+
+- X: https://x.com/poker44subnet
+- Web: https://poker44.net
+- Whitepaper: https://poker44.net/Poker44_Whitepaper.pdf
+
+---
+
 ## What is Poker44?
 
 Poker44 is a Bittensor subnet focused on one problem: detecting bots in online poker with objective, reproducible evaluation.
@@ -18,6 +26,25 @@ Validators build labeled evaluation windows (human vs bot behavior), query miner
 Miners compete by returning robust bot-risk predictions that generalize to evolving bot behavior.
 
 Poker44 is security infrastructure, not a poker room.
+
+---
+
+## Vision
+
+### Short-Mid Term (Subnet Operating Model)
+
+Poker44 currently uses a hybrid operating model to generate high-quality labeled datasets for miner evaluation.  
+The immediate direction is to consolidate this into a decentralized runtime path where gameplay/integrity services are executed on validator infrastructure, with attested execution and reproducible evaluation loops.
+
+### Mid-Long Term (Global Decentralized Platform)
+
+Beyond the current hybrid stage, Poker44 targets a fully decentralized poker integrity platform:
+
+- integrity and model-evaluation loop coordinated through the subnet,
+- transparent, verifiable settlement through smart contracts,
+- global trust-minimized operation with auditable behavior validation.
+
+In short: today’s hybrid platform is the data/evaluation engine; the destination is a global decentralized platform with on-chain settlement guarantees.
 
 ---
 
@@ -31,7 +58,7 @@ The subnet is designed to support production anti-bot workflows where suspicious
 
 ---
 
-## How the Subnet Works
+## How the Subnet Works (V0)
 
 ### Validators
 
