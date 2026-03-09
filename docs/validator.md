@@ -1,30 +1,18 @@
 # 🔐 Poker44 Validator Guide
 
-Welcome to Poker44 – the poker anti-bot subnet with objective, evolving
-evaluation. This guide covers the lean validator scaffold introduced in v0.
-
-> **Goal for v0:** fetch labeled hands from Poker44, query miners, score
-> them with average-precision/bot-recall rewards, and publish weights on-chain.
+Production validator guide for Poker44 subnet `126`.
 
 ---
 
-## ✅ Requirements
+## Requirements
 
-- Ubuntu 22.04+ (or any Linux with Python 3.10-3.12 available)
-- Python 3.10-3.12
-
-## 🔒 Production Preconditions
-
-- Validator and miner hotkeys must be registered on netuid `126`.
-- Miners enforce validator-only access by default (`blacklist.force_validator_permit=true`).
-  In production, validator hotkeys querying miners are expected to satisfy network permit requirements.
-- Validators must use a private local human-hand JSON via `POKER44_HUMAN_JSON_PATH`.
-- Honest validators must share the same `POKER44_VALIDATOR_SECRET_KEY` to keep deterministic
-  window-aligned dataset generation.
+- Linux (Ubuntu 22.04+ recommended)
+- Python 3.10+
+- Registered validator hotkey on netuid `126`
 
 ---
 
-## 🛠️ Install
+## Install
 
 ```bash
 git clone https://github.com/Poker44/Poker44-subnet
@@ -34,49 +22,48 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-___
-Validators do not use the public human corpus shipped in the repo. For
-evaluation, each validator must have a separate private local human-hand JSON
-and point `POKER44_HUMAN_JSON_PATH` at that file. Bot hands are created on the
-fly during validator dataset construction. No manual player list is required;
-the validator builds labeled human/bot chunks internally.
-Set the same `POKER44_VALIDATOR_SECRET_KEY` across honest validators so every
-validator derives the same synchronized seed per window and therefore selects
-the same human-hand slice and generates the same mixed dataset for that window.
-
-By default, the validator refreshes its dataset and queries miners once every
-1 hour. The same cadence is used for dataset rotation and miner evaluation
-unless you override it explicitly.
-
-Within each 1-hour window, honest validators generate the same mixed dataset
-from the same private human corpus and the same code path. The dataset changes
-only when the next window begins.
-
 ---
 
-### Register on Subnet 126
+## Registration
 
 ```bash
-# Register your validator on Poker44 subnet
 btcli subnet register \
   --wallet.name p44_cold \
   --wallet.hotkey p44_validator \
   --netuid 126 \
   --subtensor.network finney
 
-# Check registration status
-btcli wallet overview \
-   --wallet.name p44_cold \
-   --subtensor.network finney
+btcli wallet overview --wallet.name p44_cold --subtensor.network finney
 ```
+
 ---
 
-## ▶️ Run the loop
+## Required Environment
 
+Mandatory:
 
-#### Run validator using pm2
-`POKER44_HUMAN_JSON_PATH` is required. Without it, the validator will fail fast
-at startup.
+- `POKER44_HUMAN_JSON_PATH` (private local human dataset JSON)
+
+Recommended for deterministic validator alignment:
+
+- `POKER44_VALIDATOR_SECRET_KEY`
+
+Optional tuning:
+
+- `POKER44_DATASET_REFRESH_SECONDS` (default `3600`)
+- `POKER44_POLL_INTERVAL_SECONDS` (default = refresh value)
+- `POKER44_REWARD_WINDOW` (default `50`)
+- `POKER44_CHUNK_COUNT` (default `80`)
+- `POKER44_MIN_HANDS_PER_CHUNK` (default `60`)
+- `POKER44_MAX_HANDS_PER_CHUNK` (default `120`)
+- `POKER44_HUMAN_RATIO` (default `0.5`)
+- `POKER44_TARGET_MINER_UIDS` (comma-separated UIDs, useful for controlled local tests)
+
+---
+
+## Run Validator
+
+### PM2 command
 
 ```bash
 POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
@@ -90,93 +77,51 @@ pm2 start python --name poker44_validator -- \
   --logging.debug
 ```
 
-Example with explicit private human corpus:
+### Script
+
+Script path: `scripts/validator/run/run_vali.sh`
 
 ```bash
-POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
-POKER44_VALIDATOR_SECRET_KEY=shared-secret-for-sn126 \
-pm2 start python --name poker44_validator -- \
-  ./neurons/validator.py \
-  --netuid 126 \
-  --wallet.name p44_cold \
-  --wallet.hotkey p44_validator \
-  --subtensor.network finney \
-  --logging.debug
+chmod +x ./scripts/validator/run/run_vali.sh
+./scripts/validator/run/run_vali.sh
 ```
 
-#### Run validator using script
-If you want to run it with the help of bash script;
-Script for running the validator is at `scripts/validator/run/run_vali.sh`
+PM2:
 
-- Update the hotkey, coldkey, name, network as needed
-- Set `POKER44_HUMAN_JSON_PATH` inside the script to your private local human dataset
-- Make the script executable: `chmod + x ./scripts/validator/run/run_vali.sh`
-- Run the script: `./scripts/validator/run/run_vali.sh`
-
-
-
-#### Logs:
-```
+```bash
 pm2 logs poker44_validator
-```
-
-#### Stop / restart / delete:
-```
-pm2 stop poker44_validator
-
 pm2 restart poker44_validator
-
+pm2 stop poker44_validator
 pm2 delete poker44_validator
 ```
 
+---
 
-What happens each cycle:
+## Runtime Behavior
 
-1. Labeled hands (actions, timing, integrity signals) are fetched.
-2. A batch is generated consisting of a single hand type & multiple batches are used to create a chunk.
-3. Chunks are dispatched to miners; responses are scored with average precision,
-   bot recall, and a hard false-positive penalty on humans.
-4. Rewards are logged and used to update weights with a burn+proportional policy:
-   97% to UID 0 and 3% split proportionally across eligible miners with positive
-   reward. If no miner achieves a positive score, 100% goes to UID 0 for that
-   cycle.
+Per cycle, validator:
 
-The script currently sleeps for 1 hour between evaluation cycles by default.
+1. Builds mixed labeled chunks from private human data + generated bot data.
+2. Sanitizes payloads before sending to miners.
+3. Queries miners and scores returned `risk_scores`.
+4. Updates internal scores and attempts `set_weights` on-chain.
 
-## ⛓️ Weight-Setting Cadence
+Default production cadence:
 
-Weights are constrained by chain timing rules. If set too frequently, the chain
-may reject updates with a message equivalent to "too soon to set weights".
-
-Production recommendation:
-
-- Keep validator cadence and epoch configuration conservative and stable.
-- Do not force ultra-short epochs in production.
-- Treat successful, periodic `set_weights` inclusion as the source of truth.
-
-## ✅ Production Health Checklist
-
-- Validator reaches forward cycles and logs eligible miner UIDs.
-- Miners return valid `risk_scores` arrays (not empty responses).
-- Reward logs show burn+proportional assignment behavior.
-- Validator logs include successful weight publication on chain:
-  `set_weights on chain successfully!`
+- dataset refresh: every `3600s`
+- query loop: every `3600s` unless overridden
 
 ---
 
-## 🧭 Road to full validator
+## Production Checklist
 
-- ✅ Poker44 ingestion + heuristic scoring loop
-- ✅ Publish weights on-chain
-- ⏳ Persist receipts / attestations
-- ⏳ Held-out bot families + early-detection challenges
-- ⏳ Dashboarding and operator-facing APIs
-
-Track progress in [docs/roadmap.md](roadmap.md).
+- Validator logs show forward cycles and eligible miner UIDs.
+- Miners return non-empty `risk_scores` with expected chunk count.
+- Validator logs periodic successful weight submissions:
+  - `set_weights on chain successfully!`
 
 ---
 
-## 🆘 Help
+## Help
 
-- Open an issue on GitHub for bugs or missing APIs.
-- Reach us on Discord (@sachhp) for any doubts.
+- Open a GitHub issue for bugs or missing behavior.
