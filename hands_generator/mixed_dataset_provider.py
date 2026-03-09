@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import gzip
 import json
+import math
 import random
 import time
 from dataclasses import dataclass
@@ -34,6 +35,10 @@ class MixedDatasetConfig:
     refresh_seconds: int = 60 * 60
     seed: Optional[int] = None
     validator_secret_key: Optional[str] = None
+    # Bot generation robustness knobs
+    bot_candidate_attempts_per_chunk: int = 4
+    max_bot_generation_rounds: int = 4
+    max_shortcut_rule_accuracy: float = 0.70
 
 
 def _current_window_id(refresh_seconds: int, now: Optional[float] = None) -> int:
@@ -222,10 +227,9 @@ def _deterministic_human_selection(
         ).hexdigest(),
     )
 
-    offset_digest = hashlib.sha256(
-        f"{secret}:window:{window_id}".encode("utf-8")
-    ).hexdigest()
-    offset = int(offset_digest[:16], 16) % len(ordered_hands)
+    # Advance by full sample windows so consecutive windows avoid overlap
+    # whenever enough unique human hands exist.
+    offset = (window_id * sample_size) % len(ordered_hands)
     selected: List[Dict[str, Any]] = []
     for index in range(sample_size):
         selected.append(ordered_hands[(offset + index) % len(ordered_hands)])
@@ -239,6 +243,236 @@ def _split_chunk_sizes(rng: random.Random, n_chunks: int, min_hands: int, max_ha
 def _compute_dataset_hash(labeled_chunks: List[Dict[str, Any]]) -> str:
     payload = json.dumps(labeled_chunks, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _chunk_behavior_signature(
+    hands: List[Dict[str, Any]],
+) -> Tuple[float, float, float, float, float, float, float, float, float]:
+    """Return coarse per-hand behavior averages for matching bot/human chunk shape."""
+    if not hands:
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    total_calls = 0
+    total_checks = 0
+    total_raises = 0
+    total_folds = 0
+    total_actions = 0
+    total_streets = 0
+    total_players = 0
+    total_action_amount = 0.0
+    total_action_pot_after = 0.0
+    for hand in hands:
+        players = hand.get("players") or []
+        actions = hand.get("actions") or []
+        total_players += len(players)
+        total_actions += len(actions)
+        for action in actions:
+            action_type = action.get("action_type")
+            total_action_amount += float(action.get("amount", 0.0) or 0.0)
+            total_action_pot_after += float(action.get("pot_after", 0.0) or 0.0)
+            if action_type == "call":
+                total_calls += 1
+            elif action_type == "check":
+                total_checks += 1
+            elif action_type == "raise":
+                total_raises += 1
+            elif action_type == "fold":
+                total_folds += 1
+        total_streets += len(hand.get("streets") or [])
+
+    n = float(len(hands))
+    return (
+        total_calls / n,
+        total_checks / n,
+        total_raises / n,
+        total_folds / n,
+        total_actions / n,
+        total_streets / n,
+        total_players / n,
+        total_action_amount / n,
+        total_action_pot_after / n,
+    )
+
+
+def _signature_distance(
+    a: Tuple[float, float, float, float, float, float, float, float, float],
+    b: Tuple[float, float, float, float, float, float, float, float, float],
+) -> float:
+    """Weighted distance between chunk signatures for human/bot matching."""
+    (
+        calls_a,
+        checks_a,
+        raises_a,
+        folds_a,
+        actions_a,
+        streets_a,
+        players_a,
+        action_amount_a,
+        pot_after_a,
+    ) = a
+    (
+        calls_b,
+        checks_b,
+        raises_b,
+        folds_b,
+        actions_b,
+        streets_b,
+        players_b,
+        action_amount_b,
+        pot_after_b,
+    ) = b
+    return (
+        abs(calls_a - calls_b) * 1.0
+        + abs(checks_a - checks_b) * 0.8
+        + abs(raises_a - raises_b) * 1.0
+        + abs(folds_a - folds_b) * 0.8
+        + abs(actions_a - actions_b) * 0.35
+        + abs(streets_a - streets_b) * 1.0
+        + abs(players_a - players_b) * 1.25
+        + abs(action_amount_a - action_amount_b) * 0.12
+        + abs(pot_after_a - pot_after_b) * 0.05
+    )
+
+
+def _chunk_features_for_shortcut_rule(hands: List[Dict[str, Any]]) -> Dict[str, float]:
+    if not hands:
+        return {
+            "chunk_size": 0.0,
+            "avg_players": 0.0,
+            "avg_actions": 0.0,
+            "avg_streets": 0.0,
+            "avg_call": 0.0,
+            "avg_raise": 0.0,
+            "avg_check": 0.0,
+            "avg_fold": 0.0,
+        }
+
+    total_players = 0
+    total_actions = 0
+    total_streets = 0
+    total_calls = 0
+    total_raises = 0
+    total_checks = 0
+    total_folds = 0
+    total_amount = 0.0
+    total_pot_after = 0.0
+
+    for hand in hands:
+        players = hand.get("players") or []
+        actions = hand.get("actions") or []
+        streets = hand.get("streets") or []
+        total_players += len(players)
+        total_actions += len(actions)
+        total_streets += len(streets)
+        for action in actions:
+            action_type = action.get("action_type")
+            total_amount += float(action.get("amount", 0.0) or 0.0)
+            total_pot_after += float(action.get("pot_after", 0.0) or 0.0)
+            if action_type == "call":
+                total_calls += 1
+            elif action_type == "raise":
+                total_raises += 1
+            elif action_type == "check":
+                total_checks += 1
+            elif action_type == "fold":
+                total_folds += 1
+
+    n = float(len(hands))
+    return {
+        "chunk_size": float(len(hands)),
+        "avg_players": total_players / n,
+        "avg_actions": total_actions / n,
+        "avg_streets": total_streets / n,
+        "avg_call": total_calls / n,
+        "avg_raise": total_raises / n,
+        "avg_check": total_checks / n,
+        "avg_fold": total_folds / n,
+        "avg_amount_sum": total_amount / n,
+        "avg_pot_after_sum": total_pot_after / n,
+    }
+
+
+def _best_single_rule_accuracy(
+    labeled_chunks: List[Dict[str, Any]]
+) -> Tuple[float, Dict[str, Any]]:
+    """Estimate leakage via the best one-feature threshold rule at chunk level."""
+    rows: List[Tuple[int, Dict[str, float]]] = []
+    for chunk in labeled_chunks:
+        y = 1 if bool(chunk.get("is_bot", False)) else 0
+        rows.append((y, _chunk_features_for_shortcut_rule(chunk.get("hands", []))))
+
+    if not rows:
+        return 0.0, {"rule": None}
+
+    feature_names = list(rows[0][1].keys())
+    best_acc = 0.0
+    best_rule: Dict[str, Any] = {"type": None}
+    total = float(len(rows))
+
+    for feature in feature_names:
+        uniq = sorted({r[1][feature] for r in rows})
+        if not uniq:
+            continue
+        if len(uniq) > 200:
+            step = max(1, len(uniq) // 200)
+            uniq = uniq[::step]
+
+        for threshold in uniq:
+            for pred_bot_if_gt in (0, 1):
+                ok = 0
+                for y, feats in rows:
+                    pred = pred_bot_if_gt if feats[feature] > threshold else (1 - pred_bot_if_gt)
+                    if pred == y:
+                        ok += 1
+                acc = ok / total
+                if acc > best_acc:
+                    best_acc = acc
+                    best_rule = {
+                        "type": "gt",
+                        "feature": feature,
+                        "threshold": threshold,
+                        "pred_bot_if_gt": pred_bot_if_gt,
+                    }
+
+    return best_acc, best_rule
+
+
+def _build_bot_chunks(
+    *,
+    bot_sizes: List[int],
+    bot_profiles: List[BotProfile],
+    human_pool: List[Dict[str, Any]],
+    human_signatures: List[
+        Tuple[float, float, float, float, float, float, float, float, float]
+    ],
+    rng: random.Random,
+    candidate_attempts: int,
+) -> List[Dict[str, Any]]:
+    bot_chunks: List[Dict[str, Any]] = []
+    per_chunk_candidates = max(1, int(candidate_attempts))
+    for size in bot_sizes:
+        target_signature = human_signatures[rng.randrange(len(human_signatures))]
+        best_hands: List[Dict[str, Any]] = []
+        best_dist = float("inf")
+        for _ in range(per_chunk_candidates):
+            candidate_hands = generate_bot_chunk(
+                size=size,
+                profiles=bot_profiles,
+                reference_hands=human_pool,
+                seed=rng.randint(0, 10**9),
+            )
+            candidate_sig = _chunk_behavior_signature(candidate_hands)
+            dist = _signature_distance(candidate_sig, target_signature)
+            if dist < best_dist:
+                best_dist = dist
+                best_hands = candidate_hands
+            if dist <= 0.30:
+                break
+
+        for hand in best_hands:
+            hand["label"] = "bot"
+        bot_chunks.append({"hands": best_hands, "is_bot": True})
+    return bot_chunks
 
 
 def build_mixed_labeled_chunks(
@@ -297,22 +531,36 @@ def build_mixed_labeled_chunks(
     for size in human_sizes:
         human_chunks.append({"hands": human_pool[cursor : cursor + size], "is_bot": False})
         cursor += size
+    human_signatures = [_chunk_behavior_signature(chunk["hands"]) for chunk in human_chunks]
 
     bot_profiles: List[BotProfile] = _default_bot_profiles()
-    bot_chunks: List[Dict[str, Any]] = []
-    for size in bot_sizes:
-        bot_hands = generate_bot_chunk(
-            size=size,
-            profiles=bot_profiles,
-            reference_hands=human_pool,
-            seed=rng.randint(0, 10**9),
-        )
-        for hand in bot_hands:
-            hand["label"] = "bot"
-        bot_chunks.append({"hands": bot_hands, "is_bot": True})
+    rounds = max(1, int(cfg.max_bot_generation_rounds))
+    best_labeled_chunks: List[Dict[str, Any]] = []
+    best_shortcut_acc = math.inf
+    best_shortcut_rule: Dict[str, Any] = {"type": None}
+    selected_round = 1
 
-    labeled_chunks = human_chunks + bot_chunks
-    rng.shuffle(labeled_chunks)
+    for round_idx in range(1, rounds + 1):
+        bot_chunks = _build_bot_chunks(
+            bot_sizes=bot_sizes,
+            bot_profiles=bot_profiles,
+            human_pool=human_pool,
+            human_signatures=human_signatures,
+            rng=rng,
+            candidate_attempts=cfg.bot_candidate_attempts_per_chunk,
+        )
+        candidate_chunks = human_chunks + bot_chunks
+        rng.shuffle(candidate_chunks)
+        shortcut_acc, shortcut_rule = _best_single_rule_accuracy(candidate_chunks)
+        if shortcut_acc < best_shortcut_acc:
+            best_shortcut_acc = shortcut_acc
+            best_shortcut_rule = shortcut_rule
+            best_labeled_chunks = candidate_chunks
+            selected_round = round_idx
+        if shortcut_acc <= cfg.max_shortcut_rule_accuracy:
+            break
+
+    labeled_chunks = best_labeled_chunks
 
     dataset_hash = _compute_dataset_hash(labeled_chunks)
 
@@ -329,6 +577,10 @@ def build_mixed_labeled_chunks(
         "effective_seed": effective_seed,
         "window_start": window_start_iso,
         "window_end": window_end_iso,
+        "shortcut_rule_accuracy": best_shortcut_acc,
+        "shortcut_rule": best_shortcut_rule,
+        "bot_generation_rounds": rounds,
+        "selected_bot_generation_round": selected_round,
     }
     return labeled_chunks, dataset_hash, stats
 
