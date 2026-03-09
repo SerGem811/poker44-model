@@ -153,6 +153,15 @@ You can contribute by:
 
 Constructive issues and PRs are welcome.
 
+### Development Tests
+
+`pytest` is kept as a development dependency, not a runtime dependency.
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ---
 
 ## License
