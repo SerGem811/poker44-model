@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Tuple
 
 import bittensor as bt
+
+UTC = timezone.utc
 
 
 class SynchronizedSeedManager:

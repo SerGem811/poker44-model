@@ -7,7 +7,7 @@ import math
 import random
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -22,6 +22,7 @@ from poker44.validator.seed_manager import SynchronizedSeedManager
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_HUMAN_JSON_PATH = REPO_ROOT / "hands_generator" / "human_hands" / "poker_hands_combined.json.gz"
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "validator_mixed_chunks.json"
+UTC = timezone.utc
 
 
 @dataclass

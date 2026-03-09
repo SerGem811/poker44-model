@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hands_generator.mixed_dataset_provider import (
@@ -132,3 +132,4 @@ def test_no_human_reuse_across_consecutive_windows_with_shared_secret(tmp_path):
     assert human_a
     assert human_b
     assert human_a.isdisjoint(human_b)
+UTC = timezone.utc
