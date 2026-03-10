@@ -69,12 +69,16 @@ Optional tuning:
 ```bash
 POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
 POKER44_VALIDATOR_SECRET_KEY=shared-secret-for-sn126 \
+POKER44_CHUNK_COUNT=40 \
+POKER44_REWARD_WINDOW=40 \
+POKER44_POLL_INTERVAL_SECONDS=300 \
 pm2 start python --name poker44_validator -- \
   ./neurons/validator.py \
   --netuid 126 \
   --wallet.name p44_cold \
   --wallet.hotkey p44_validator \
   --subtensor.network finney \
+  --neuron.timeout 60 \
   --logging.debug
 ```
 
@@ -86,6 +90,13 @@ Script path: `scripts/validator/run/run_vali.sh`
 chmod +x ./scripts/validator/run/run_vali.sh
 ./scripts/validator/run/run_vali.sh
 ```
+
+Before using the script, set at least:
+
+- `WALLET_NAME`
+- `HOTKEY`
+- `POKER44_HUMAN_JSON_PATH`
+- `POKER44_VALIDATOR_SECRET_KEY`
 
 PM2:
 

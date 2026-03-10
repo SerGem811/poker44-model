@@ -42,6 +42,15 @@ chmod +x ./scripts/miner/run/run_miner.sh
 ./scripts/miner/run/run_miner.sh
 ```
 
+Before using the script, set at least:
+
+- `WALLET_NAME`
+- `HOTKEY`
+- `AXON_PORT`
+- `ALLOWED_VALIDATOR_HOTKEYS` for the recommended Swarm-like allowlist mode
+
+If `ALLOWED_VALIDATOR_HOTKEYS` is left empty, the script falls back to `--blacklist.force_validator_permit`.
+
 PM2:
 
 ```bash
