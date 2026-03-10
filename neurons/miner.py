@@ -99,48 +99,11 @@ class Miner(BaseMinerNeuron):
 
     async def blacklist(self, synapse: DetectionSynapse) -> Tuple[bool, str]:
         """Determine whether to blacklist incoming requests."""
-        if synapse.dendrite is None or synapse.dendrite.hotkey is None:
-            bt.logging.warning("Received a request without a dendrite or hotkey.")
-            return True, "Missing dendrite or hotkey"
-
-        # Check if hotkey is registered
-        if synapse.dendrite.hotkey not in self.metagraph.hotkeys:
-            if not self.config.blacklist.allow_non_registered:
-                bt.logging.trace(
-                    f"Blacklisting un-registered hotkey {synapse.dendrite.hotkey}"
-                )
-                return True, "Unrecognized hotkey"
-
-        # Get the caller's UID
-        uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)
-
-        # Check validator permit if required
-        if self.config.blacklist.force_validator_permit:
-            if not self.metagraph.validator_permit[uid]:
-                bt.logging.warning(
-                    f"Blacklisting a request from non-validator hotkey {synapse.dendrite.hotkey}"
-                )
-                return True, "Non-validator hotkey"
-
-        bt.logging.trace(
-            f"Not blacklisting recognized hotkey {synapse.dendrite.hotkey}"
-        )
-        return False, "Hotkey recognized!"
+        return self.common_blacklist(synapse)
 
     async def priority(self, synapse: DetectionSynapse) -> float:
         """Assign priority based on caller's stake."""
-        if synapse.dendrite is None or synapse.dendrite.hotkey is None:
-            bt.logging.warning("Received a request without a dendrite or hotkey.")
-            return 0.0
-
-        # Get the caller's UID and stake
-        caller_uid = self.metagraph.hotkeys.index(synapse.dendrite.hotkey)
-        priority = float(self.metagraph.S[caller_uid])
-        
-        bt.logging.trace(
-            f"Prioritizing {synapse.dendrite.hotkey} with value: {priority}"
-        )
-        return priority
+        return self.caller_priority(synapse)
 
 
 if __name__ == "__main__":

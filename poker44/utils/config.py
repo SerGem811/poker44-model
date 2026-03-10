@@ -68,10 +68,22 @@ def add_args(cls, parser: argparse.ArgumentParser) -> None:
     help="Only allow requests from validators with permits.",
     )
     parser.add_argument(
+        "--no-blacklist.force_validator_permit",
+        action="store_false",
+        dest="blacklist.force_validator_permit",
+        help="Allow registered callers without validator permits.",
+    )
+    parser.add_argument(
         "--blacklist.allow_non_registered",
         action="store_true",
         default=False,
         help="Allow requests from non-registered entities.",
+    )
+    parser.add_argument(
+        "--blacklist.allowed_validator_hotkeys",
+        nargs="*",
+        default=[],
+        help="Optional allowlist of validator hotkeys permitted to query miners.",
     )
 
 def add_validator_args(cls, parser: argparse.ArgumentParser) -> None:
