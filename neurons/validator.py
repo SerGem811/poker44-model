@@ -98,8 +98,9 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info(
             "🧭 Dataset generation is deterministic per refresh window across honest validators."
         )
+        configured_poll_interval = getattr(cfg, "poll_interval_seconds", refresh_seconds)
         self.poll_interval = int(
-            os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(refresh_seconds))
+            os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )
         self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "50"))
         self.prediction_buffer = {}
