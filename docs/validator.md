@@ -58,6 +58,7 @@ Optional tuning:
 - `POKER44_MAX_HANDS_PER_CHUNK` (default `120`)
 - `POKER44_HUMAN_RATIO` (default `0.5`)
 - `POKER44_TARGET_MINER_UIDS` (comma-separated UIDs, useful for controlled local tests)
+- `--neuron.timeout` (default `20s`, validator -> miner query timeout)
 
 ---
 
@@ -110,6 +111,18 @@ Default production cadence:
 
 - dataset refresh: every `3600s`
 - query loop: every `3600s` unless overridden
+
+Validated operating profile:
+
+- `POKER44_CHUNK_COUNT=40`
+- `POKER44_REWARD_WINDOW=40`
+- `--neuron.timeout 60`
+
+This profile was validated as a practical starting point for production-like runs:
+
+- `80` chunks with the current heuristic miners caused validator query timeouts;
+- `40` chunks with `60s` timeout completed successfully;
+- setting `POKER44_REWARD_WINDOW=40` allows miners to receive non-zero weights from the first completed cycle.
 
 ---
 
