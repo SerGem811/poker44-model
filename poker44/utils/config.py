@@ -51,6 +51,12 @@ def add_args(cls, parser: argparse.ArgumentParser) -> None:
         help="Concurrent forward coroutines to execute per step.",
     )
     parser.add_argument(
+        "--neuron.timeout",
+        type=float,
+        default=20.0,
+        help="Timeout in seconds for each validator to miner query.",
+    )
+    parser.add_argument(
         "--poll_interval_seconds",
         type=int,
         default=60 * 60,
