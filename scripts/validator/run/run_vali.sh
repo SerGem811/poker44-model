@@ -10,6 +10,10 @@ VALIDATOR_SCRIPT="./neurons/validator.py"
 PM2_NAME="poker44_validator"  ##  name of validator, as you wish
 POKER44_HUMAN_JSON_PATH="/path/to/private/poker_data_combined.json"
 POKER44_VALIDATOR_SECRET_KEY="shared-secret-for-sn126"
+POKER44_CHUNK_COUNT=40
+POKER44_REWARD_WINDOW=40
+POKER44_POLL_INTERVAL_SECONDS=300
+NEURON_TIMEOUT=60
 
 if [ ! -f "$VALIDATOR_SCRIPT" ]; then
     echo "Error: Validator script not found at $VALIDATOR_SCRIPT"
@@ -32,6 +36,9 @@ pm2 delete $PM2_NAME 2>/dev/null || true
 export PYTHONPATH="$(pwd)"
 export POKER44_HUMAN_JSON_PATH="$POKER44_HUMAN_JSON_PATH"
 export POKER44_VALIDATOR_SECRET_KEY="$POKER44_VALIDATOR_SECRET_KEY"
+export POKER44_CHUNK_COUNT="$POKER44_CHUNK_COUNT"
+export POKER44_REWARD_WINDOW="$POKER44_REWARD_WINDOW"
+export POKER44_POLL_INTERVAL_SECONDS="$POKER44_POLL_INTERVAL_SECONDS"
 
 pm2 start $VALIDATOR_SCRIPT \
   --name $PM2_NAME -- \
@@ -39,9 +46,11 @@ pm2 start $VALIDATOR_SCRIPT \
   --wallet.name $WALLET_NAME \
   --wallet.hotkey $HOTKEY \
   --subtensor.network $NETWORK \
+  --neuron.timeout $NEURON_TIMEOUT \
   --logging.debug
 
 pm2 save
 
 echo "Validator started: $PM2_NAME"
 echo "View logs: pm2 logs $PM2_NAME"
+echo "Profile: chunks=$POKER44_CHUNK_COUNT reward_window=$POKER44_REWARD_WINDOW poll_interval_s=$POKER44_POLL_INTERVAL_SECONDS timeout_s=$NEURON_TIMEOUT"
