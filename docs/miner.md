@@ -51,6 +51,18 @@ pm2 stop poker44_miner
 pm2 delete poker44_miner
 ```
 
+Direct CLI example with explicit validator allowlist:
+
+```bash
+python neurons/miner.py \
+  --netuid 126 \
+  --wallet.name my_cold \
+  --wallet.hotkey my_poker44_hotkey \
+  --subtensor.network finney \
+  --axon.port 8091 \
+  --blacklist.allowed_validator_hotkeys <validator_hotkey_1> <validator_hotkey_2>
+```
+
 ---
 
 ## Request/Response Contract
@@ -72,14 +84,32 @@ Important: validator payloads are sanitized to remove label/identity leakage bef
 
 ## Production Access Policy
 
-Miners should run with validator-only access enabled:
+Poker44 miners support two production access modes.
 
-- `blacklist.force_validator_permit=true`
+Recommended mode, similar to Swarm:
+
+- `--blacklist.allowed_validator_hotkeys <validator_hotkey...>`
+
+Meaning:
+
+- only the listed validator hotkeys may query your miner;
+- requests must be signed and pass Bittensor's default request verification;
+- this does not depend on `validator_permit=True` being visible on the metagraph.
+
+Fallback mode:
+
+- `--blacklist.force_validator_permit`
 
 Meaning:
 
 - requests from non-permitted peers are rejected;
-- your miner must stay reachable and correctly served on-chain.
+- access depends on the caller having `validator_permit=True` on the metagraph.
+
+Operational note:
+
+- if `--blacklist.allowed_validator_hotkeys` is set, the miner uses the allowlist policy;
+- if no allowlist is set, the miner falls back to the `validator_permit` policy;
+- in both cases, your miner must stay reachable and correctly served on-chain.
 
 ---
 

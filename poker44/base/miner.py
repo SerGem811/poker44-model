@@ -22,6 +22,11 @@ import argparse
 import traceback
 
 import bittensor as bt
+try:
+    from bittensor.core.errors import NotVerifiedException
+except Exception:  # pragma: no cover - SDK compatibility shim
+    class NotVerifiedException(Exception):
+        pass
 
 from poker44.base.neuron import BaseNeuron
 from poker44.utils.config import add_miner_args
@@ -62,6 +67,8 @@ class BaseMinerNeuron(BaseNeuron):
             blacklist_fn = self.blacklist,
             priority_fn = self.priority,
         )
+        if self.validator_hotkey_whitelist:
+            self.axon.verify_fns[DetectionSynapse.__name__] = self.verify_validator_request
         # # self.axon.attach(
         #     forward_fn=self.forward_feedback,
         #     blacklist_fn=self.blacklist_feedback,
@@ -79,6 +86,74 @@ class BaseMinerNeuron(BaseNeuron):
         self.is_running: bool = False
         self.thread: Union[threading.Thread, None] = None
         self.lock = asyncio.Lock()
+
+    @property
+    def validator_hotkey_whitelist(self) -> set[str]:
+        configured = getattr(self.config.blacklist, "allowed_validator_hotkeys", []) or []
+        return {str(hotkey).strip() for hotkey in configured if str(hotkey).strip()}
+
+    async def verify_validator_request(self, synapse: DetectionSynapse) -> None:
+        """Require signed requests from explicitly allowed validator hotkeys."""
+        if synapse.dendrite is None:
+            raise NotVerifiedException("Missing dendrite terminal in request")
+
+        hotkey = synapse.dendrite.hotkey
+        if hotkey not in self.validator_hotkey_whitelist:
+            raise NotVerifiedException(f"{hotkey} is not a whitelisted validator")
+
+        signature = getattr(synapse.dendrite, "signature", None)
+        if not signature:
+            raise NotVerifiedException("Request carries no signature header")
+
+        default_verify = getattr(self.axon, "default_verify", None)
+        if default_verify is None:
+            raise NotVerifiedException("Axon default verification is unavailable")
+
+        await default_verify(synapse)
+
+    def common_blacklist(self, synapse: DetectionSynapse):
+        """Shared miner admission policy with optional validator allowlist."""
+        if synapse.dendrite is None or synapse.dendrite.hotkey is None:
+            bt.logging.warning("Received a request without a dendrite or hotkey.")
+            return True, "Missing dendrite or hotkey"
+
+        hotkey = synapse.dendrite.hotkey
+        whitelist = self.validator_hotkey_whitelist
+
+        if whitelist:
+            if hotkey in whitelist:
+                bt.logging.trace(f"Allowing whitelisted validator hotkey {hotkey}")
+                return False, "Whitelisted validator hotkey"
+            bt.logging.warning(f"Blacklisting non-whitelisted hotkey {hotkey}")
+            return True, "Hotkey not in validator allowlist"
+
+        if hotkey not in self.metagraph.hotkeys:
+            if not self.config.blacklist.allow_non_registered:
+                bt.logging.trace(f"Blacklisting un-registered hotkey {hotkey}")
+                return True, "Unrecognized hotkey"
+            return False, "Non-registered hotkey allowed"
+
+        uid = self.metagraph.hotkeys.index(hotkey)
+        if self.config.blacklist.force_validator_permit and not self.metagraph.validator_permit[uid]:
+            bt.logging.warning(f"Blacklisting a request from non-validator hotkey {hotkey}")
+            return True, "Non-validator hotkey"
+
+        bt.logging.trace(f"Not blacklisting recognized hotkey {hotkey}")
+        return False, "Hotkey recognized"
+
+    def caller_priority(self, synapse: DetectionSynapse) -> float:
+        if synapse.dendrite is None or synapse.dendrite.hotkey is None:
+            bt.logging.warning("Received a request without a dendrite or hotkey.")
+            return 0.0
+
+        hotkey = synapse.dendrite.hotkey
+        if hotkey not in self.metagraph.hotkeys:
+            return 0.0
+
+        caller_uid = self.metagraph.hotkeys.index(hotkey)
+        priority = float(self.metagraph.S[caller_uid])
+        bt.logging.trace(f"Prioritizing {hotkey} with value: {priority}")
+        return priority
 
     def run(self):
         """
