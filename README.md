@@ -111,6 +111,13 @@ Then follow:
 - [Validator setup](docs/validator.md)
 - [Miner setup](docs/miner.md)
 
+Validated starting profile for production-like operation:
+
+- `POKER44_CHUNK_COUNT=40`
+- `POKER44_REWARD_WINDOW=40`
+- `POKER44_POLL_INTERVAL_SECONDS=300`
+- `--neuron.timeout 60`
+
 ---
 
 ## Repository Links

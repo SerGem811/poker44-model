@@ -51,14 +51,14 @@ Recommended for deterministic validator alignment:
 Optional tuning:
 
 - `POKER44_DATASET_REFRESH_SECONDS` (default `3600`)
-- `POKER44_POLL_INTERVAL_SECONDS` (default = refresh value)
-- `POKER44_REWARD_WINDOW` (default `50`)
-- `POKER44_CHUNK_COUNT` (default `80`)
+- `POKER44_POLL_INTERVAL_SECONDS` (default `300`)
+- `POKER44_REWARD_WINDOW` (default `40`)
+- `POKER44_CHUNK_COUNT` (default `40`)
 - `POKER44_MIN_HANDS_PER_CHUNK` (default `60`)
 - `POKER44_MAX_HANDS_PER_CHUNK` (default `120`)
 - `POKER44_HUMAN_RATIO` (default `0.5`)
 - `POKER44_TARGET_MINER_UIDS` (comma-separated UIDs, useful for controlled local tests)
-- `--neuron.timeout` (default `20s`, validator -> miner query timeout)
+- `--neuron.timeout` (default `60s`, validator -> miner query timeout)
 
 ---
 
@@ -135,15 +135,15 @@ Per cycle, validator:
 Default production cadence:
 
 - dataset refresh: every `3600s`
-- query loop: every `3600s` unless overridden
+- query loop: every `300s` unless overridden
 
-Validated operating profile:
+Validated starting profile:
 
 - `POKER44_CHUNK_COUNT=40`
 - `POKER44_REWARD_WINDOW=40`
 - `--neuron.timeout 60`
 
-This profile was validated as a practical starting point for production-like runs:
+These defaults were validated as a practical starting point for production-like runs:
 
 - `80` chunks with the current heuristic miners caused validator query timeouts;
 - `40` chunks with `60s` timeout completed successfully;

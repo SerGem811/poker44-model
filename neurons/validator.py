@@ -67,7 +67,7 @@ class Validator(BaseValidatorNeuron):
         refresh_seconds = int(
             os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60))
         )
-        chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "80"))
+        chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "40"))
         min_hands_per_chunk = int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))
         max_hands_per_chunk = int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))
         human_ratio = float(os.getenv("POKER44_HUMAN_RATIO", "0.5"))
@@ -102,7 +102,7 @@ class Validator(BaseValidatorNeuron):
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )
-        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "50"))
+        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
         self.prediction_buffer = {}
         self.label_buffer = {}
 
