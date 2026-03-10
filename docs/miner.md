@@ -51,6 +51,16 @@ Before using the script, set at least:
 
 If `ALLOWED_VALIDATOR_HOTKEYS` is left empty, the script falls back to `--blacklist.force_validator_permit`.
 
+The script is environment-driven. Example:
+
+```bash
+WALLET_NAME=my_cold \
+HOTKEY=my_poker44_hotkey \
+AXON_PORT=8091 \
+ALLOWED_VALIDATOR_HOTKEYS="validator_hotkey_1 validator_hotkey_2" \
+./scripts/miner/run/run_miner.sh
+```
+
 PM2:
 
 ```bash

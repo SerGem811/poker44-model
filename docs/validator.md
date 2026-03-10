@@ -98,6 +98,20 @@ Before using the script, set at least:
 - `POKER44_HUMAN_JSON_PATH`
 - `POKER44_VALIDATOR_SECRET_KEY`
 
+The script is environment-driven. Example:
+
+```bash
+WALLET_NAME=p44_cold \
+HOTKEY=p44_validator \
+POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
+POKER44_VALIDATOR_SECRET_KEY=shared-secret-for-sn126 \
+POKER44_CHUNK_COUNT=40 \
+POKER44_REWARD_WINDOW=40 \
+POKER44_POLL_INTERVAL_SECONDS=300 \
+NEURON_TIMEOUT=60 \
+./scripts/validator/run/run_vali.sh
+```
+
 PM2:
 
 ```bash
