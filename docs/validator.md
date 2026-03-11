@@ -44,14 +44,6 @@ Mandatory:
 
 - `POKER44_HUMAN_JSON_PATH` (private local human dataset JSON)
 
-Recommended for deterministic validator alignment:
-
-- `POKER44_VALIDATOR_SECRET_KEY`
-
-`POKER44_VALIDATOR_SECRET_KEY` is a private shared secret used to derive deterministic per-window dataset seeds across honest validators.
-It is not an on-chain key and must remain private.
-Validators that should stay aligned must use the same value.
-
 Optional tuning:
 
 - `POKER44_DATASET_REFRESH_SECONDS` (default `3600`)
@@ -72,7 +64,6 @@ Optional tuning:
 
 ```bash
 POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
-POKER44_VALIDATOR_SECRET_KEY=shared-secret-for-sn126 \
 POKER44_CHUNK_COUNT=40 \
 POKER44_REWARD_WINDOW=40 \
 POKER44_POLL_INTERVAL_SECONDS=300 \
@@ -100,7 +91,6 @@ Before using the script, set at least:
 - `WALLET_NAME`
 - `HOTKEY`
 - `POKER44_HUMAN_JSON_PATH`
-- `POKER44_VALIDATOR_SECRET_KEY`
 
 The script is environment-driven. Example:
 
@@ -108,7 +98,6 @@ The script is environment-driven. Example:
 WALLET_NAME=p44_cold \
 HOTKEY=p44_validator \
 POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
-POKER44_VALIDATOR_SECRET_KEY=shared-secret-for-sn126 \
 POKER44_CHUNK_COUNT=40 \
 POKER44_REWARD_WINDOW=40 \
 POKER44_POLL_INTERVAL_SECONDS=300 \

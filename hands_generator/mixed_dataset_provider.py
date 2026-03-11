@@ -17,8 +17,6 @@ from hands_generator.bot_hands.generate_poker_data import BotProfile
 from hands_generator.data_generator import _default_bot_profiles, generate_bot_chunk
 from poker44.core.hand_json import from_standard_json
 from poker44.core.models import LabeledHandBatch
-from poker44.validator.seed_manager import SynchronizedSeedManager
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_HUMAN_JSON_PATH = REPO_ROOT / "hands_generator" / "human_hands" / "poker_hands_combined.json.gz"
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "validator_mixed_chunks.json"
@@ -35,7 +33,6 @@ class MixedDatasetConfig:
     human_ratio: float = 0.5
     refresh_seconds: int = 60 * 60
     seed: Optional[int] = None
-    validator_secret_key: Optional[str] = None
     # Bot generation robustness knobs
     bot_candidate_attempts_per_chunk: int = 4
     max_bot_generation_rounds: int = 4
@@ -63,10 +60,6 @@ def _stable_hand_fingerprint(hand: Dict[str, Any]) -> str:
 def _window_effective_seed(
     cfg: MixedDatasetConfig, window_id: int, *, window_start_iso: Optional[str] = None
 ) -> int:
-    if cfg.validator_secret_key and window_start_iso:
-        seed_material = f"{cfg.validator_secret_key}:{window_start_iso}"
-        digest = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
-        return int(digest[:8], 16)
     return _effective_seed(cfg.seed, window_id)
 
 
@@ -78,11 +71,8 @@ def _window_start_iso_for_id(cfg: MixedDatasetConfig, window_id: int) -> str:
 def _window_human_sizes(
     cfg: MixedDatasetConfig, window_id: int, *, window_start_iso: Optional[str] = None
 ) -> List[int]:
-    resolved_window_start_iso = window_start_iso
-    if cfg.validator_secret_key and resolved_window_start_iso is None:
-        resolved_window_start_iso = _window_start_iso_for_id(cfg, window_id)
     effective_seed = _window_effective_seed(
-        cfg, window_id, window_start_iso=resolved_window_start_iso
+        cfg, window_id, window_start_iso=window_start_iso
     )
     rng = random.Random(effective_seed)
 
@@ -220,7 +210,7 @@ def _deterministic_human_selection(
     if not valid_hands:
         raise RuntimeError("Could not sample any valid human hands from source JSON")
 
-    secret = cfg.validator_secret_key or str(cfg.seed or 0)
+    secret = str(cfg.seed or 0)
     ordered_hands = sorted(
         valid_hands,
         key=lambda hand: hashlib.sha256(
@@ -484,19 +474,7 @@ def build_mixed_labeled_chunks(
     )
     window_start_iso = None
     window_end_iso = None
-    if cfg.validator_secret_key:
-        seed_manager = SynchronizedSeedManager(
-            secret_key=cfg.validator_secret_key,
-            window_minutes=max(1, cfg.refresh_seconds // 60),
-        )
-        anchor_ts = (resolved_window_id * cfg.refresh_seconds) + 1
-        effective_seed, window_start, window_end = seed_manager.generate_seed(
-            current_time=datetime.fromtimestamp(anchor_ts, tz=UTC)
-        )
-        window_start_iso = window_start.isoformat()
-        window_end_iso = window_end.isoformat()
-    else:
-        effective_seed = _effective_seed(cfg.seed, resolved_window_id)
+    effective_seed = _effective_seed(cfg.seed, resolved_window_id)
     rng = random.Random(effective_seed)
 
     if cfg.chunk_count <= 0:
@@ -516,7 +494,7 @@ def build_mixed_labeled_chunks(
     bot_sizes = _split_chunk_sizes(rng, n_bot, cfg.min_hands_per_chunk, cfg.max_hands_per_chunk)
 
     needed_human_hands = sum(human_sizes)
-    if cfg.validator_secret_key and cfg.human_json_path.suffix != ".gz":
+    if cfg.human_json_path.suffix != ".gz":
         human_pool = _deterministic_human_selection(
             cfg.human_json_path, needed_human_hands, cfg, resolved_window_id
         )

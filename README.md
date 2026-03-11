@@ -63,7 +63,6 @@ The subnet is designed to support production anti-bot workflows where suspicious
 ### Validators
 
 - Build mixed labeled chunks from private human hands plus generated bot hands.
-- Keep dataset generation synchronized across honest validators using a shared secret window seed.
 - Query miners with standardized chunk payloads.
 - Score miner outputs and set weights on-chain.
 
@@ -92,7 +91,7 @@ Intended use:
 ### Validator evaluation data
 
 Validators should not rely on the public corpus for evaluation.  
-Set `POKER44_HUMAN_JSON_PATH` to a private local human dataset and keep `POKER44_VALIDATOR_SECRET_KEY` aligned across honest validators.
+Set `POKER44_HUMAN_JSON_PATH` to a private local human dataset.
 
 ---
 
