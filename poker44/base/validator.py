@@ -261,14 +261,17 @@ class BaseValidatorNeuron(BaseNeuron):
         bt.logging.debug("uint_weights", uint_weights)
         bt.logging.debug("uint_uids", uint_uids)
 
+        wait_for_inclusion = bool(self.config.neuron.wait_for_inclusion)
+        wait_for_finalization = bool(self.config.neuron.wait_for_finalization)
+
         # Set the weights on chain via our subtensor connection.
         result, msg = self.subtensor.set_weights(
             wallet=self.wallet,
             netuid=self.config.netuid,
             uids=uint_uids,
             weights=uint_weights,
-            wait_for_finalization=False,
-            wait_for_inclusion=False,
+            wait_for_finalization=wait_for_finalization,
+            wait_for_inclusion=wait_for_inclusion,
             version_key=self.spec_version,
         )
         if (
@@ -281,7 +284,10 @@ class BaseValidatorNeuron(BaseNeuron):
             )
             try:
                 result, msg = self._set_weights_commit_reveal_fallback(
-                    uint_uids=uint_uids, uint_weights=uint_weights
+                    uint_uids=uint_uids,
+                    uint_weights=uint_weights,
+                    wait_for_inclusion=wait_for_inclusion,
+                    wait_for_finalization=wait_for_finalization,
                 )
             except Exception as err:
                 result, msg = False, str(err)
@@ -294,15 +300,24 @@ class BaseValidatorNeuron(BaseNeuron):
                 "commit_crv3_weights is unavailable on the current RPC; falling back to classic set_weights."
             )
             result, msg = self._set_weights_classic_fallback(
-                uint_uids=uint_uids, uint_weights=uint_weights
+                uint_uids=uint_uids,
+                uint_weights=uint_weights,
+                wait_for_inclusion=wait_for_inclusion,
+                wait_for_finalization=wait_for_finalization,
             )
-        if result is True:
-            bt.logging.info("set_weights on chain successfully!")
+        if result is True and (wait_for_inclusion or wait_for_finalization):
+            bt.logging.info(f"set_weights confirmed on chain: {msg}")
+        elif result is True:
+            bt.logging.info(f"set_weights submitted to chain without confirmation: {msg}")
         else:
             bt.logging.error("set_weights failed", msg)
 
     def _set_weights_commit_reveal_fallback(
-        self, uint_uids: List[int], uint_weights: List[int]
+        self,
+        uint_uids: List[int],
+        uint_weights: List[int],
+        wait_for_inclusion: bool,
+        wait_for_finalization: bool,
     ):
         """Fallback for bittensor 9.6.0 commit-reveal path, which omits `hotkey`."""
         from bittensor.core.extrinsics.commit_reveal import (
@@ -335,13 +350,17 @@ class BaseValidatorNeuron(BaseNeuron):
             netuid=self.config.netuid,
             commit=commit_for_reveal,
             reveal_round=reveal_round,
-            wait_for_inclusion=False,
-            wait_for_finalization=False,
+            wait_for_inclusion=wait_for_inclusion,
+            wait_for_finalization=wait_for_finalization,
             period=8,
         )
 
     def _set_weights_classic_fallback(
-        self, uint_uids: List[int], uint_weights: List[int]
+        self,
+        uint_uids: List[int],
+        uint_weights: List[int],
+        wait_for_inclusion: bool,
+        wait_for_finalization: bool,
     ):
         """Fallback to classic set_weights when commit-reveal v3 is unavailable."""
         from bittensor.core.extrinsics.set_weights import set_weights_extrinsic
@@ -353,8 +372,8 @@ class BaseValidatorNeuron(BaseNeuron):
             uids=uint_uids,
             weights=uint_weights,
             version_key=self.spec_version,
-            wait_for_inclusion=False,
-            wait_for_finalization=False,
+            wait_for_inclusion=wait_for_inclusion,
+            wait_for_finalization=wait_for_finalization,
             period=8,
         )
 

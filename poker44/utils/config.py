@@ -39,6 +39,30 @@ def add_args(cls, parser: argparse.ArgumentParser) -> None:
         help="Skip setting weights on-chain.",
     )
     parser.add_argument(
+        "--neuron.wait_for_inclusion",
+        action="store_true",
+        default=True,
+        help="Wait for weight-setting extrinsics to be included before treating them as successful.",
+    )
+    parser.add_argument(
+        "--no-neuron.wait_for_inclusion",
+        action="store_false",
+        dest="neuron.wait_for_inclusion",
+        help="Do not wait for inclusion when submitting weights.",
+    )
+    parser.add_argument(
+        "--neuron.wait_for_finalization",
+        action="store_true",
+        default=True,
+        help="Wait for weight-setting extrinsics to be finalized before treating them as successful.",
+    )
+    parser.add_argument(
+        "--no-neuron.wait_for_finalization",
+        action="store_false",
+        dest="neuron.wait_for_finalization",
+        help="Do not wait for finalization when submitting weights.",
+    )
+    parser.add_argument(
         "--neuron.moving_average_alpha",
         type=float,
         default=0.05,
