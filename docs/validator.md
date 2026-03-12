@@ -19,12 +19,22 @@ git clone https://github.com/Poker44/Poker44-subnet
 cd Poker44-subnet
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 pip install -e .
+pip install bittensor-cli
+```
+
+Or use the helper script:
+
+```bash
+./scripts/validator/main/setup.sh
 ```
 
 ---
 
 ## Registration
+
+`btcli` is provided by the separate `bittensor-cli` package.
 
 ```bash
 btcli subnet register \
