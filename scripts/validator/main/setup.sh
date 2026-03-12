@@ -66,10 +66,10 @@ install_modules() {
   success_msg "Main package installed."
 }
 
-install_bittensor() {
-  info_msg "Installing Bittensor v9.6.0 and CLI v9.4.2..."
-  pip install bittensor==9.6.0 bittensor-cli==9.4.2 || handle_error "Failed to install Bittensor"
-  success_msg "Bittensor installed."
+install_bittensor_cli() {
+  info_msg "Installing bittensor-cli..."
+  pip install bittensor-cli || handle_error "Failed to install bittensor-cli"
+  success_msg "bittensor-cli installed."
 }
 
 show_completion_info() {
@@ -91,7 +91,7 @@ main() {
   upgrade_pip
   install_python_reqs
   install_modules
-  install_bittensor
+  install_bittensor_cli
   show_completion_info
 }
 
