@@ -307,7 +307,9 @@ async def _run_forward_cycle(validator) -> None:
     
     rewards_array, metrics = _compute_windowed_rewards(validator, miner_uids)
     reward_map = dict(zip(miner_uids, rewards_array.tolist()))
+    metrics_map = {uid: metric for uid, metric in zip(miner_uids, metrics)}
     bt.logging.info(f"Reward map by UID: {reward_map}")
+    bt.logging.info(f"Reward metrics by UID: {metrics_map}")
     winner_uids, winner_rewards = _select_weight_targets(reward_map)
 
     validator.update_scores(winner_rewards, winner_uids)
