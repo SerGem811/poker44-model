@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import os
 import traceback
-import time
 from typing import Any, Dict, List, Sequence, Tuple
 
 import bittensor as bt
@@ -322,6 +321,8 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
     miner_uids: List[int] = []
     axons: List = []
     target_uids_env = os.getenv("POKER44_TARGET_MINER_UIDS", "").strip()
+    miners_per_cycle_env = os.getenv("POKER44_MINERS_PER_CYCLE", "16").strip()
+    miners_per_cycle = 16
     target_uids = None
     if target_uids_env:
         try:
@@ -336,6 +337,13 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
                 f"Invalid POKER44_TARGET_MINER_UIDS={target_uids_env!r}; ignoring filter."
             )
             target_uids = None
+    try:
+        miners_per_cycle = int(miners_per_cycle_env)
+    except ValueError:
+        bt.logging.warning(
+            f"Invalid POKER44_MINERS_PER_CYCLE={miners_per_cycle_env!r}; defaulting to 16."
+        )
+        miners_per_cycle = 16
 
     for uid, axon in enumerate(validator.metagraph.axons):
         if uid == UID_ZERO:
@@ -350,6 +358,20 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
             continue
         miner_uids.append(uid)
         axons.append(axon)
+
+    if target_uids is None and miners_per_cycle > 0 and len(miner_uids) > miners_per_cycle:
+        # Rotate deterministically through the eligible set so coverage expands over time
+        # without blasting every miner on each cycle.
+        offset = ((getattr(validator, "forward_count", 1) - 1) * miners_per_cycle) % len(miner_uids)
+        rotated = list(zip(miner_uids, axons))
+        rotated = rotated[offset:] + rotated[:offset]
+        selected = rotated[:miners_per_cycle]
+        miner_uids = [uid for uid, _ in selected]
+        axons = [axon for _, axon in selected]
+        bt.logging.info(
+            f"Sampling {miners_per_cycle} miners this cycle from {len(rotated)} eligible miners "
+            f"(rotation offset={offset})."
+        )
 
     bt.logging.info(f"Eligible miners this cycle: {miner_uids}")
     return miner_uids, axons
