@@ -271,10 +271,92 @@ class BaseValidatorNeuron(BaseNeuron):
             wait_for_inclusion=False,
             version_key=self.spec_version,
         )
+        if (
+            result is False
+            and "get_encrypted_commit() missing 1 required positional argument: 'hotkey'"
+            in str(msg)
+        ):
+            bt.logging.warning(
+                "Detected bittensor commit-reveal hotkey bug; retrying with local fallback."
+            )
+            try:
+                result, msg = self._set_weights_commit_reveal_fallback(
+                    uint_uids=uint_uids, uint_weights=uint_weights
+                )
+            except Exception as err:
+                result, msg = False, str(err)
+        if (
+            result is False
+            and "Call function 'SubtensorModule.commit_crv3_weights' not found"
+            in str(msg)
+        ):
+            bt.logging.warning(
+                "commit_crv3_weights is unavailable on the current RPC; falling back to classic set_weights."
+            )
+            result, msg = self._set_weights_classic_fallback(
+                uint_uids=uint_uids, uint_weights=uint_weights
+            )
         if result is True:
             bt.logging.info("set_weights on chain successfully!")
         else:
             bt.logging.error("set_weights failed", msg)
+
+    def _set_weights_commit_reveal_fallback(
+        self, uint_uids: List[int], uint_weights: List[int]
+    ):
+        """Fallback for bittensor 9.6.0 commit-reveal path, which omits `hotkey`."""
+        from bittensor.core.extrinsics.commit_reveal import (
+            _do_commit_reveal_v3,
+            convert_and_normalize_weights_and_uids,
+            get_encrypted_commit,
+        )
+
+        current_block = self.subtensor.get_current_block()
+        subnet_hyperparameters = self.subtensor.get_subnet_hyperparameters(
+            self.config.netuid, block=current_block
+        )
+        normalized_uids, normalized_weights = convert_and_normalize_weights_and_uids(
+            uint_uids, uint_weights
+        )
+        commit_for_reveal, reveal_round = get_encrypted_commit(
+            uids=normalized_uids,
+            weights=normalized_weights,
+            version_key=self.spec_version,
+            tempo=subnet_hyperparameters.tempo,
+            current_block=current_block,
+            netuid=self.config.netuid,
+            subnet_reveal_period_epochs=subnet_hyperparameters.commit_reveal_period,
+            block_time=12.0,
+            hotkey=self.wallet.hotkey.public_key,
+        )
+        return _do_commit_reveal_v3(
+            subtensor=self.subtensor,
+            wallet=self.wallet,
+            netuid=self.config.netuid,
+            commit=commit_for_reveal,
+            reveal_round=reveal_round,
+            wait_for_inclusion=False,
+            wait_for_finalization=False,
+            period=8,
+        )
+
+    def _set_weights_classic_fallback(
+        self, uint_uids: List[int], uint_weights: List[int]
+    ):
+        """Fallback to classic set_weights when commit-reveal v3 is unavailable."""
+        from bittensor.core.extrinsics.set_weights import set_weights_extrinsic
+
+        return set_weights_extrinsic(
+            subtensor=self.subtensor,
+            wallet=self.wallet,
+            netuid=self.config.netuid,
+            uids=uint_uids,
+            weights=uint_weights,
+            version_key=self.spec_version,
+            wait_for_inclusion=False,
+            wait_for_finalization=False,
+            period=8,
+        )
 
     def resync_metagraph(self):
         """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph."""
