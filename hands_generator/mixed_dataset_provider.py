@@ -17,6 +17,10 @@ from hands_generator.bot_hands.generate_poker_data import BotProfile
 from hands_generator.data_generator import _default_bot_profiles, generate_bot_chunk
 from poker44.core.hand_json import from_standard_json
 from poker44.core.models import LabeledHandBatch
+from poker44.validator.sanitization import (
+    sanitize_hand_for_miner,
+    sanitized_chunk_signature,
+)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_HUMAN_JSON_PATH = REPO_ROOT / "hands_generator" / "human_hands" / "poker_hands_combined.json.gz"
 DEFAULT_OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "validator_mixed_chunks.json"
@@ -34,7 +38,7 @@ class MixedDatasetConfig:
     refresh_seconds: int = 60 * 60
     seed: Optional[int] = None
     # Bot generation robustness knobs
-    bot_candidate_attempts_per_chunk: int = 4
+    bot_candidate_attempts_per_chunk: int = 8
     max_bot_generation_rounds: int = 4
     max_shortcut_rule_accuracy: float = 0.70
 
@@ -231,6 +235,24 @@ def _split_chunk_sizes(rng: random.Random, n_chunks: int, min_hands: int, max_ha
     return [rng.randint(min_hands, max_hands) for _ in range(n_chunks)]
 
 
+def _paired_chunk_sizes(
+    rng: random.Random,
+    n_human: int,
+    n_bot: int,
+    min_hands: int,
+    max_hands: int,
+) -> Tuple[List[int], List[int]]:
+    paired = min(n_human, n_bot)
+    base_sizes = _split_chunk_sizes(rng, paired, min_hands, max_hands)
+    human_sizes = list(base_sizes)
+    bot_sizes = list(base_sizes)
+    if n_human > paired:
+        human_sizes.extend(_split_chunk_sizes(rng, n_human - paired, min_hands, max_hands))
+    if n_bot > paired:
+        bot_sizes.extend(_split_chunk_sizes(rng, n_bot - paired, min_hands, max_hands))
+    return human_sizes, bot_sizes
+
+
 def _compute_dataset_hash(labeled_chunks: List[Dict[str, Any]]) -> str:
     payload = json.dumps(labeled_chunks, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -285,6 +307,61 @@ def _chunk_behavior_signature(
     )
 
 
+def _sanitized_chunk_behavior_signature(
+    hands: List[Dict[str, Any]],
+) -> Tuple[float, float, float, float, float, float, float, float, float]:
+    return sanitized_chunk_signature(hands)
+
+
+def _chunk_structure_signature(
+    hands: List[Dict[str, Any]],
+) -> Tuple[float, float, float, float, float, float, float, float, float]:
+    """Miner-visible chunk structure: ending street mix and occupied seat mix."""
+    if not hands:
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    sanitized_hands = [sanitize_hand_for_miner(hand) for hand in hands]
+    preflop = flop = turn = river = 0
+    p2 = p3 = p4 = p5 = p6p = 0
+
+    for hand in sanitized_hands:
+        streets = hand.get("streets") or []
+        street_count = len(streets)
+        if street_count <= 0:
+            preflop += 1
+        elif street_count == 1:
+            flop += 1
+        elif street_count == 2:
+            turn += 1
+        else:
+            river += 1
+
+        player_count = len(hand.get("players") or [])
+        if player_count <= 2:
+            p2 += 1
+        elif player_count == 3:
+            p3 += 1
+        elif player_count == 4:
+            p4 += 1
+        elif player_count == 5:
+            p5 += 1
+        else:
+            p6p += 1
+
+    n = float(len(sanitized_hands))
+    return (
+        preflop / n,
+        flop / n,
+        turn / n,
+        river / n,
+        p2 / n,
+        p3 / n,
+        p4 / n,
+        p5 / n,
+        p6p / n,
+    )
+
+
 def _signature_distance(
     a: Tuple[float, float, float, float, float, float, float, float, float],
     b: Tuple[float, float, float, float, float, float, float, float, float],
@@ -313,16 +390,126 @@ def _signature_distance(
         pot_after_b,
     ) = b
     return (
-        abs(calls_a - calls_b) * 1.0
-        + abs(checks_a - checks_b) * 0.8
-        + abs(raises_a - raises_b) * 1.0
-        + abs(folds_a - folds_b) * 0.8
-        + abs(actions_a - actions_b) * 0.35
-        + abs(streets_a - streets_b) * 1.0
-        + abs(players_a - players_b) * 1.25
-        + abs(action_amount_a - action_amount_b) * 0.12
-        + abs(pot_after_a - pot_after_b) * 0.05
+        abs(calls_a - calls_b) * 1.5
+        + abs(checks_a - checks_b) * 1.4
+        + abs(raises_a - raises_b) * 1.8
+        + abs(folds_a - folds_b) * 2.6
+        + abs(actions_a - actions_b) * 0.8
+        + abs(streets_a - streets_b) * 2.4
+        + abs(players_a - players_b) * 1.5
+        + abs(action_amount_a - action_amount_b) * 0.6
+        + abs(pot_after_a - pot_after_b) * 0.25
     )
+
+
+def _structure_distance(
+    a: Tuple[float, float, float, float, float, float, float, float, float],
+    b: Tuple[float, float, float, float, float, float, float, float, float],
+) -> float:
+    (
+        preflop_a,
+        flop_a,
+        turn_a,
+        river_a,
+        p2_a,
+        p3_a,
+        p4_a,
+        p5_a,
+        p6p_a,
+    ) = a
+    (
+        preflop_b,
+        flop_b,
+        turn_b,
+        river_b,
+        p2_b,
+        p3_b,
+        p4_b,
+        p5_b,
+        p6p_b,
+    ) = b
+    return (
+        abs(preflop_a - preflop_b) * 3.2
+        + abs(flop_a - flop_b) * 2.4
+        + abs(turn_a - turn_b) * 2.4
+        + abs(river_a - river_b) * 2.8
+        + abs(p2_a - p2_b) * 0.8
+        + abs(p3_a - p3_b) * 0.8
+        + abs(p4_a - p4_b) * 1.0
+        + abs(p5_a - p5_b) * 1.0
+        + abs(p6p_a - p6p_b) * 1.2
+    )
+
+
+def _clamp_profile_value(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _profiles_for_target_signature(
+    bot_profiles: List[BotProfile],
+    target_signature: Tuple[float, float, float, float, float, float, float, float, float],
+) -> List[BotProfile]:
+    (
+        target_calls,
+        target_checks,
+        target_raises,
+        target_folds,
+        _target_actions,
+        target_streets,
+        _target_players,
+        target_amount,
+        _target_pot_after,
+    ) = target_signature
+
+    loosen_delta = (
+        (target_streets - 0.9) * 0.16
+        + (target_calls - 0.7) * 0.08
+        - (target_folds - 4.5) * 0.03
+    )
+    aggression_delta = (
+        (target_raises - 0.8) * 0.10
+        + (target_amount - 0.35) * 0.10
+        - (target_checks - 1.0) * 0.03
+    )
+    loosen_delta = _clamp_profile_value(loosen_delta, -0.12, 0.12)
+    aggression_delta = _clamp_profile_value(aggression_delta, -0.10, 0.12)
+
+    tuned_profiles: List[BotProfile] = []
+    for profile in bot_profiles:
+        tuned_profiles.append(
+            BotProfile(
+                name=f"{profile.name}_targeted",
+                tightness=_clamp_profile_value(profile.tightness - loosen_delta, 0.30, 0.82),
+                aggression=_clamp_profile_value(profile.aggression + aggression_delta, 0.25, 0.90),
+                bluff_freq=_clamp_profile_value(
+                    profile.bluff_freq + (0.20 * aggression_delta) + (0.10 * loosen_delta),
+                    0.0,
+                    0.18,
+                ),
+                max_risk_fraction_of_stack=_clamp_profile_value(
+                    profile.max_risk_fraction_of_stack + (0.06 * loosen_delta) + (0.04 * aggression_delta),
+                    0.10,
+                    0.30,
+                ),
+                tilt_factor=profile.tilt_factor,
+                bet_pot_fraction_small=_clamp_profile_value(
+                    profile.bet_pot_fraction_small + (0.04 * aggression_delta),
+                    0.18,
+                    0.55,
+                ),
+                bet_pot_fraction_medium=_clamp_profile_value(
+                    profile.bet_pot_fraction_medium + (0.06 * aggression_delta),
+                    0.30,
+                    0.85,
+                ),
+                bet_pot_fraction_large=_clamp_profile_value(
+                    profile.bet_pot_fraction_large + (0.08 * aggression_delta),
+                    0.50,
+                    1.10,
+                ),
+            )
+        )
+    return tuned_profiles
 
 
 def _chunk_features_for_shortcut_rule(hands: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -436,28 +623,41 @@ def _build_bot_chunks(
     human_signatures: List[
         Tuple[float, float, float, float, float, float, float, float, float]
     ],
+    human_structures: List[
+        Tuple[float, float, float, float, float, float, float, float, float]
+    ],
     rng: random.Random,
     candidate_attempts: int,
 ) -> List[Dict[str, Any]]:
     bot_chunks: List[Dict[str, Any]] = []
-    per_chunk_candidates = max(1, int(candidate_attempts))
-    for size in bot_sizes:
-        target_signature = human_signatures[rng.randrange(len(human_signatures))]
+    base_candidate_attempts = max(1, int(candidate_attempts))
+    for idx, size in enumerate(bot_sizes):
+        target_signature = human_signatures[idx % len(human_signatures)]
+        target_structure = human_structures[idx % len(human_structures)]
+        target_profiles = _profiles_for_target_signature(bot_profiles, target_signature)
+        per_chunk_candidates = base_candidate_attempts
+        if target_signature[5] >= 0.9 or target_signature[3] <= 4.9:
+            per_chunk_candidates += 4
+        if target_structure[0] <= 0.58:
+            per_chunk_candidates += 2
         best_hands: List[Dict[str, Any]] = []
         best_dist = float("inf")
         for _ in range(per_chunk_candidates):
             candidate_hands = generate_bot_chunk(
                 size=size,
-                profiles=bot_profiles,
+                profiles=target_profiles,
                 reference_hands=human_pool,
                 seed=rng.randint(0, 10**9),
             )
-            candidate_sig = _chunk_behavior_signature(candidate_hands)
-            dist = _signature_distance(candidate_sig, target_signature)
+            candidate_sig = _sanitized_chunk_behavior_signature(candidate_hands)
+            candidate_structure = _chunk_structure_signature(candidate_hands)
+            dist = _signature_distance(candidate_sig, target_signature) + _structure_distance(
+                candidate_structure, target_structure
+            )
             if dist < best_dist:
                 best_dist = dist
                 best_hands = candidate_hands
-            if dist <= 0.30:
+            if dist <= 0.16:
                 break
 
         for hand in best_hands:
@@ -490,8 +690,13 @@ def build_mixed_labeled_chunks(
     n_human = max(1, min(cfg.chunk_count - 1, n_human))
     n_bot = cfg.chunk_count - n_human
 
-    human_sizes = _split_chunk_sizes(rng, n_human, cfg.min_hands_per_chunk, cfg.max_hands_per_chunk)
-    bot_sizes = _split_chunk_sizes(rng, n_bot, cfg.min_hands_per_chunk, cfg.max_hands_per_chunk)
+    human_sizes, bot_sizes = _paired_chunk_sizes(
+        rng,
+        n_human,
+        n_bot,
+        cfg.min_hands_per_chunk,
+        cfg.max_hands_per_chunk,
+    )
 
     needed_human_hands = sum(human_sizes)
     if cfg.human_json_path.suffix != ".gz":
@@ -510,7 +715,10 @@ def build_mixed_labeled_chunks(
     for size in human_sizes:
         human_chunks.append({"hands": human_pool[cursor : cursor + size], "is_bot": False})
         cursor += size
-    human_signatures = [_chunk_behavior_signature(chunk["hands"]) for chunk in human_chunks]
+    human_signatures = [
+        _sanitized_chunk_behavior_signature(chunk["hands"]) for chunk in human_chunks
+    ]
+    human_structures = [_chunk_structure_signature(chunk["hands"]) for chunk in human_chunks]
 
     bot_profiles: List[BotProfile] = _default_bot_profiles()
     rounds = max(1, int(cfg.max_bot_generation_rounds))
@@ -525,12 +733,20 @@ def build_mixed_labeled_chunks(
             bot_profiles=bot_profiles,
             human_pool=human_pool,
             human_signatures=human_signatures,
+            human_structures=human_structures,
             rng=rng,
             candidate_attempts=cfg.bot_candidate_attempts_per_chunk,
         )
         candidate_chunks = human_chunks + bot_chunks
         rng.shuffle(candidate_chunks)
-        shortcut_acc, shortcut_rule = _best_single_rule_accuracy(candidate_chunks)
+        sanitized_candidate_chunks = [
+            {
+                "hands": [sanitize_hand_for_miner(hand) for hand in chunk.get("hands", [])],
+                "is_bot": bool(chunk.get("is_bot", False)),
+            }
+            for chunk in candidate_chunks
+        ]
+        shortcut_acc, shortcut_rule = _best_single_rule_accuracy(sanitized_candidate_chunks)
         if shortcut_acc < best_shortcut_acc:
             best_shortcut_acc = shortcut_acc
             best_shortcut_rule = shortcut_rule

@@ -72,6 +72,13 @@ install_bittensor_cli() {
   success_msg "bittensor-cli installed."
 }
 
+verify_installation() {
+  info_msg "Verifying validator environment setup..."
+  python -c "import bittensor, dotenv, numpy, pandas, sklearn; print(f'✓ Bittensor: {bittensor.__version__}')" \
+    || handle_error "Environment verification failed. Required Python packages are not importable."
+  success_msg "Installation verification completed."
+}
+
 show_completion_info() {
   echo
   success_msg "Poker44 validator environment configured!"
@@ -92,6 +99,7 @@ main() {
   install_python_reqs
   install_modules
   install_bittensor_cli
+  verify_installation
   show_completion_info
 }
 

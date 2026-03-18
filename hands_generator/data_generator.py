@@ -48,11 +48,11 @@ def load_human_hands(path: Path = HUMAN_HANDS_PATH) -> List[Dict[str, Any]]:
 
 def _default_bot_profiles() -> List[BotProfile]:
     return [
-        BotProfile(name="balanced", tightness=0.55, aggression=0.55, bluff_freq=0.08),
-        BotProfile(name="tight_aggressive", tightness=0.70, aggression=0.75, bluff_freq=0.05),
-        BotProfile(name="loose_aggressive", tightness=0.40, aggression=0.80, bluff_freq=0.12),
-        BotProfile(name="tight_passive", tightness=0.68, aggression=0.35, bluff_freq=0.03),
-        BotProfile(name="loose_passive", tightness=0.42, aggression=0.30, bluff_freq=0.08),
+        BotProfile(name="balanced", tightness=0.54, aggression=0.66, bluff_freq=0.05),
+        BotProfile(name="tight_aggressive", tightness=0.62, aggression=0.80, bluff_freq=0.04),
+        BotProfile(name="loose_aggressive", tightness=0.44, aggression=0.78, bluff_freq=0.08),
+        BotProfile(name="tight_passive", tightness=0.60, aggression=0.50, bluff_freq=0.02),
+        BotProfile(name="loose_passive", tightness=0.46, aggression=0.46, bluff_freq=0.05),
     ]
 
 

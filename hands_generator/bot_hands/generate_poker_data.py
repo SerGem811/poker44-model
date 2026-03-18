@@ -84,21 +84,21 @@ def _mutate_profile(profile: BotProfile, rng: random.Random) -> BotProfile:
     """Create a nearby profile variant so bots are not carbon copies."""
     return BotProfile(
         name=f"{profile.name}_v{rng.randint(1, 9999)}",
-        tightness=_clamp_float(profile.tightness + rng.uniform(-0.08, 0.08), 0.20, 0.90),
-        aggression=_clamp_float(profile.aggression + rng.uniform(-0.10, 0.10), 0.15, 0.95),
-        bluff_freq=_clamp_float(profile.bluff_freq + rng.uniform(-0.03, 0.03), 0.0, 0.25),
+        tightness=_clamp_float(profile.tightness + rng.uniform(-0.08, 0.08), 0.28, 0.80),
+        aggression=_clamp_float(profile.aggression + rng.uniform(-0.10, 0.10), 0.32, 0.94),
+        bluff_freq=_clamp_float(profile.bluff_freq + rng.uniform(-0.03, 0.03), 0.0, 0.20),
         max_risk_fraction_of_stack=_clamp_float(
-            profile.max_risk_fraction_of_stack + rng.uniform(-0.05, 0.05), 0.08, 0.35
+            profile.max_risk_fraction_of_stack + rng.uniform(-0.05, 0.05), 0.10, 0.32
         ),
-        tilt_factor=_clamp_float(profile.tilt_factor + rng.uniform(-0.08, 0.08), 0.0, 0.5),
+        tilt_factor=_clamp_float(profile.tilt_factor + rng.uniform(-0.08, 0.08), 0.0, 0.35),
         bet_pot_fraction_small=_clamp_float(
-            profile.bet_pot_fraction_small + rng.uniform(-0.08, 0.08), 0.15, 0.55
+            profile.bet_pot_fraction_small + rng.uniform(-0.07, 0.07), 0.18, 0.58
         ),
         bet_pot_fraction_medium=_clamp_float(
-            profile.bet_pot_fraction_medium + rng.uniform(-0.10, 0.10), 0.25, 0.90
+            profile.bet_pot_fraction_medium + rng.uniform(-0.10, 0.10), 0.30, 0.96
         ),
         bet_pot_fraction_large=_clamp_float(
-            profile.bet_pot_fraction_large + rng.uniform(-0.10, 0.12), 0.45, 1.25
+            profile.bet_pot_fraction_large + rng.uniform(-0.12, 0.12), 0.50, 1.28
         ),
     )
 
