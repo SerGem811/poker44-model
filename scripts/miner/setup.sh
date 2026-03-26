@@ -2,6 +2,11 @@
 # setup.sh - Setup Poker44 miner environment
 set -e
 
+SAFE_BITTENSOR_CLI_VERSION="9.20.0"
+SAFE_BITTENSOR_WALLET_VERSION="4.0.1"
+BLOCKED_BITTENSOR_CLI_VERSION="9.18.2"
+BLOCKED_BITTENSOR_WALLET_VERSION="4.0.2"
+
 handle_error() {
   echo -e "\e[31m[ERROR]\e[0m $1" >&2
   exit 1
@@ -67,9 +72,52 @@ install_modules() {
 }
 
 install_bittensor_cli() {
-  info_msg "Installing bittensor-cli..."
-  pip install bittensor-cli || handle_error "Failed to install bittensor-cli"
-  success_msg "bittensor-cli installed."
+  info_msg "Installing pinned Bittensor CLI and wallet versions..."
+  pip install "bittensor-cli==${SAFE_BITTENSOR_CLI_VERSION}" "bittensor-wallet==${SAFE_BITTENSOR_WALLET_VERSION}" \
+    || handle_error "Failed to install pinned Bittensor packages"
+  success_msg "Pinned Bittensor packages installed."
+}
+
+guard_bittensor_versions() {
+  info_msg "Checking installed Bittensor package versions..."
+  python - <<'PY' || handle_error "Blocked or unexpected Bittensor package versions detected"
+from importlib import metadata
+from sys import exit
+
+safe_cli = "9.20.0"
+safe_wallet = "4.0.1"
+blocked = {
+    "bittensor-cli": "9.18.2",
+    "bittensor-wallet": "4.0.2",
+}
+
+packages = {}
+for name in ("bittensor-cli", "bittensor-wallet"):
+    try:
+        packages[name] = metadata.version(name)
+    except metadata.PackageNotFoundError:
+        packages[name] = None
+
+for name, blocked_version in blocked.items():
+    if packages[name] == blocked_version:
+        print(f"Blocked version installed: {name}=={blocked_version}")
+        exit(1)
+
+if packages["bittensor-cli"] != safe_cli or packages["bittensor-wallet"] != safe_wallet:
+    print(
+        "Unexpected Bittensor package versions:",
+        f"bittensor-cli=={packages['bittensor-cli']}",
+        f"bittensor-wallet=={packages['bittensor-wallet']}",
+    )
+    exit(1)
+
+print(
+    "Verified pinned Bittensor package versions:",
+    f"bittensor-cli=={packages['bittensor-cli']}",
+    f"bittensor-wallet=={packages['bittensor-wallet']}",
+)
+PY
+  success_msg "Pinned Bittensor package versions verified."
 }
 
 verify_installation() {
@@ -98,6 +146,7 @@ main() {
   install_python_reqs
   install_modules
   install_bittensor_cli
+  guard_bittensor_versions
   verify_installation
   show_completion_info
 }
