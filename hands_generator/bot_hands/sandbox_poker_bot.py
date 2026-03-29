@@ -124,6 +124,10 @@ class BotProfile:
     bet_pot_fraction_small: float = 0.33
     bet_pot_fraction_medium: float = 0.55
     bet_pot_fraction_large: float = 0.80
+    # Structural behavior controls used to shape how often hands end early.
+    preflop_defend_bias: float = 0.0      # lower -> fold more often vs opens/3bets
+    postflop_continue_bias: float = 0.0   # lower -> fold/check more often after flop
+    trap_frequency: float = 0.0           # lower -> fewer slowplays/call-downs with strong hands
 
 
 @dataclass
@@ -279,10 +283,11 @@ class SandboxPokerBot:
         """
         # If no call amount (can check), treat as opening opportunity
         opening = (state.to_call == 0 and legal.can_check)
+        defend_bias = self._bounded_bias(self.profile.preflop_defend_bias, scale=0.20)
 
         # Base willingness to play hands (tightness)
         # Later position => slightly looser
-        play_threshold = self.profile.tightness - (0.10 * pos_factor)
+        play_threshold = self.profile.tightness - (0.10 * pos_factor) - (0.08 * defend_bias)
         
         # If we have actual hand strength from CSV, use it
         hs = state.hand_strength
@@ -302,7 +307,8 @@ class SandboxPokerBot:
                     return BotDecision(ActionType.FOLD, 0, {"reason": "weak_fold_big_raise"})
                 
                 # Good pot odds + late position = defend occasionally
-                if pot_odds < 0.20 and pos_factor > 0.60 and self.rng.random() < 0.42:
+                defend_prob = 0.30 + (0.18 * defend_bias)
+                if pot_odds < 0.20 and pos_factor > 0.60 and self.rng.random() < defend_prob:
                     return BotDecision(ActionType.CALL if legal.can_call else ActionType.FOLD, 
                                      state.to_call, {"reason": "weak_defend_good_odds"})
                 return BotDecision(ActionType.FOLD, 0, {"reason": "weak_fold"})
@@ -314,7 +320,11 @@ class SandboxPokerBot:
         if strength_bucket == "medium":
             if opening:
                 # Open sometimes depending on aggression and position
-                open_prob = 0.34 + 0.54 * self.profile.aggression * (0.45 + 0.55 * pos_factor)
+                open_prob = (
+                    0.26
+                    + 0.46 * self.profile.aggression * (0.45 + 0.55 * pos_factor)
+                    + (0.10 * defend_bias)
+                )
                 if legal.can_bet and self.rng.random() < open_prob:
                     amt = self._size_open_raise(state, legal)
                     return BotDecision(ActionType.BET, amt, {"reason": "medium_open_bet"})
@@ -326,12 +336,13 @@ class SandboxPokerBot:
                     return BotDecision(ActionType.FOLD, 0, {"reason": "medium_fold_risk_cap"})
 
                 threat_level = state.to_call / max(1, state.big_blind)
-                call_edge = hs - pot_odds
-                if legal.can_raise and hs > 0.60 and threat_level <= 5 and self.rng.random() < (0.28 + 0.28 * self.profile.aggression):
+                raise_prob = max(0.0, 0.24 + 0.22 * self.profile.aggression + (0.12 * defend_bias))
+                if legal.can_raise and hs > 0.60 and threat_level <= 5 and self.rng.random() < raise_prob:
                     amt = self._size_raise(state, legal, large=False)
                     return BotDecision(ActionType.RAISE, amt, {"reason": "medium_preflop_reraise"})
 
-                if (((pot_odds < 0.24 and threat_level <= 5) or hs > 0.56) and self.rng.random() < 0.60):
+                call_prob = max(0.12, 0.44 + (0.22 * defend_bias))
+                if (((pot_odds < 0.24 and threat_level <= 5) or hs > 0.56) and self.rng.random() < call_prob):
                     return BotDecision(ActionType.CALL, state.to_call, {"reason": "medium_call"})
                 if legal.can_fold:
                     return BotDecision(ActionType.FOLD, 0, {"reason": "medium_fold_bad_odds"})
@@ -378,6 +389,8 @@ class SandboxPokerBot:
         # Preflop hole-card strength should only weakly inform postflop lines.
         hs = self._effective_postflop_strength(state, pos_factor)
         strength_bucket = self._bucket_strength(hs, pos_factor)
+        continue_bias = self._bounded_bias(self.profile.postflop_continue_bias, scale=0.22)
+        trap_bias = self._bounded_bias(self.profile.trap_frequency, scale=0.18)
 
         # Determine if we are facing a bet
         facing_bet = (state.to_call > 0 and legal.can_call)
@@ -391,7 +404,8 @@ class SandboxPokerBot:
         if strength_bucket == "weak":
             # Bluff opportunity
             if not facing_bet and (legal.can_bet or legal.can_raise):
-                if self.rng.random() < self.profile.bluff_freq * (0.6 + 0.6 * pos_factor):
+                bluff_prob = self.profile.bluff_freq * (0.42 + 0.44 * pos_factor) * (1.0 + 0.25 * continue_bias)
+                if self.rng.random() < bluff_prob:
                     amt = self._size_bet(state, legal, small=True)
                     act = ActionType.BET if legal.can_bet else ActionType.RAISE
                     return BotDecision(act, amt, {"reason": "weak_bluff"})
@@ -405,7 +419,7 @@ class SandboxPokerBot:
                     adjusted_strength = hs
                 
                 # Good pot odds = consider calling rarely, mostly on flop in position.
-                peel_prob = 0.12 + 0.12 * pos_factor
+                peel_prob = max(0.02, 0.08 + 0.08 * pos_factor + (0.14 * continue_bias))
                 if (
                     state.street == Street.FLOP
                     and pot_odds < 0.13
@@ -426,21 +440,25 @@ class SandboxPokerBot:
                 if self._risk_too_high(state.to_call, state.stack) and legal.can_fold:
                     return BotDecision(ActionType.FOLD, 0, {"reason": "medium_fold_risk_cap_postflop"})
 
-                required_edge = 0.06 if state.street == Street.FLOP else 0.10
+                required_edge = 0.08 if state.street == Street.FLOP else 0.14
                 if hs >= pot_odds + required_edge:
-                    if legal.can_raise and hs > 0.62 and self.rng.random() < (0.22 + 0.24 * self.profile.aggression * pos_factor):
+                    raise_prob = max(
+                        0.02,
+                        0.12 + 0.18 * self.profile.aggression * pos_factor + (0.12 * continue_bias),
+                    )
+                    if legal.can_raise and hs > 0.62 and self.rng.random() < raise_prob:
                         amt = self._size_raise(state, legal, large=False)
                         return BotDecision(ActionType.RAISE, amt, {"reason": "medium_raise_semibluff"})
-                    call_prob = 0.30 + 0.14 * pos_factor
+                    call_prob = max(0.08, 0.18 + 0.12 * pos_factor + (0.20 * continue_bias))
                     if state.street in (Street.TURN, Street.RIVER):
-                        call_prob += 0.10
+                        call_prob -= 0.04
                     if self.rng.random() < call_prob:
                         return BotDecision(ActionType.CALL, state.to_call, {"reason": "medium_call_postflop"})
                 if legal.can_fold:
                     return BotDecision(ActionType.FOLD, 0, {"reason": "medium_fold_bad_odds"})
             
             # Not facing bet: bet for value
-            value_bet_prob = 0.18 + 0.20 * self.profile.aggression
+            value_bet_prob = max(0.04, 0.10 + 0.18 * self.profile.aggression + (0.10 * continue_bias))
             if legal.can_bet and self.rng.random() < value_bet_prob:
                 amt = self._size_bet(state, legal, small=False)
                 return BotDecision(ActionType.BET, amt, {"reason": "medium_value_bet"})
@@ -453,18 +471,19 @@ class SandboxPokerBot:
             # Method I: Bet deeper with strong hands on turn/river
             is_late_street = state.street in (Street.TURN, Street.RIVER)
             
-            if facing_bet and legal.can_raise and self.rng.random() < (0.64 + 0.18 * self.profile.aggression):
+            raise_prob = max(0.18, 0.48 + 0.18 * self.profile.aggression + (0.12 * continue_bias) - (0.10 * trap_bias))
+            if facing_bet and legal.can_raise and self.rng.random() < raise_prob:
                 amt = self._size_raise(state, legal, large=True)
                 return BotDecision(ActionType.RAISE, amt, {"reason": "strong_raise_value"})
             
             if facing_bet and legal.can_call and not self._risk_too_high(state.to_call, state.stack):
-                call_prob = 0.46 if is_late_street else 0.40
+                call_prob = (0.24 if is_late_street else 0.28) + (0.16 * trap_bias) + (0.08 * continue_bias)
                 if self.rng.random() < call_prob:
                     return BotDecision(ActionType.CALL, state.to_call, {"reason": "strong_call_trap"})
             if facing_bet and legal.can_fold and self._risk_too_high(state.to_call, state.stack):
                 return BotDecision(ActionType.FOLD, 0, {"reason": "strong_fold_risk_cap_postflop"})
             
-            if facing_bet and legal.can_call:
+            if facing_bet and legal.can_call and trap_bias > -0.05:
                 return BotDecision(ActionType.CALL, state.to_call, {"reason": "strong_call_trap"})
             
             if not facing_bet and legal.can_bet:
@@ -511,23 +530,28 @@ class SandboxPokerBot:
             return "medium"
         return "strong"
 
+    def _bounded_bias(self, value: float, *, scale: float) -> float:
+        return max(-scale, min(scale, float(value or 0.0)))
+
     def _effective_postflop_strength(self, state: GameState, pos_factor: float) -> float:
         """Blend preflop strength back toward the mean so later streets are less deterministic."""
         hs = state.hand_strength
+        continue_bias = self._bounded_bias(self.profile.postflop_continue_bias, scale=0.20)
         if hs is None:
-            return 0.28 + 0.40 * self.rng.random() + 0.08 * pos_factor
+            baseline = 0.24 + 0.34 * self.rng.random() + 0.06 * pos_factor + (0.10 * continue_bias)
+            return max(0.0, min(1.0, baseline))
 
         street_anchor = {
-            Street.FLOP: 0.50,
-            Street.TURN: 0.48,
-            Street.RIVER: 0.46,
+            Street.FLOP: 0.46,
+            Street.TURN: 0.42,
+            Street.RIVER: 0.38,
         }.get(state.street, 0.50)
         street_noise = {
             Street.FLOP: 0.10,
-            Street.TURN: 0.12,
-            Street.RIVER: 0.14,
+            Street.TURN: 0.11,
+            Street.RIVER: 0.12,
         }.get(state.street, 0.10)
-        blended = (0.52 * hs) + (0.38 * street_anchor) + (0.10 * pos_factor)
+        blended = (0.42 * hs) + (0.46 * street_anchor) + (0.06 * pos_factor) + (0.12 * continue_bias)
         blended += self.rng.uniform(-street_noise, street_noise)
         return max(0.0, min(1.0, blended))
 

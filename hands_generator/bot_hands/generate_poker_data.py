@@ -100,6 +100,15 @@ def _mutate_profile(profile: BotProfile, rng: random.Random) -> BotProfile:
         bet_pot_fraction_large=_clamp_float(
             profile.bet_pot_fraction_large + rng.uniform(-0.12, 0.12), 0.50, 1.28
         ),
+        preflop_defend_bias=_clamp_float(
+            profile.preflop_defend_bias + rng.uniform(-0.25, 0.25), -1.0, 1.0
+        ),
+        postflop_continue_bias=_clamp_float(
+            profile.postflop_continue_bias + rng.uniform(-0.25, 0.25), -1.0, 1.0
+        ),
+        trap_frequency=_clamp_float(
+            profile.trap_frequency + rng.uniform(-0.20, 0.20), -1.0, 1.0
+        ),
     )
 
 @dataclass

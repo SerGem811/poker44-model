@@ -48,11 +48,51 @@ def load_human_hands(path: Path = HUMAN_HANDS_PATH) -> List[Dict[str, Any]]:
 
 def _default_bot_profiles() -> List[BotProfile]:
     return [
-        BotProfile(name="balanced", tightness=0.54, aggression=0.66, bluff_freq=0.05),
-        BotProfile(name="tight_aggressive", tightness=0.62, aggression=0.80, bluff_freq=0.04),
-        BotProfile(name="loose_aggressive", tightness=0.44, aggression=0.78, bluff_freq=0.08),
-        BotProfile(name="tight_passive", tightness=0.60, aggression=0.50, bluff_freq=0.02),
-        BotProfile(name="loose_passive", tightness=0.46, aggression=0.46, bluff_freq=0.05),
+        BotProfile(
+            name="balanced",
+            tightness=0.58,
+            aggression=0.58,
+            bluff_freq=0.04,
+            preflop_defend_bias=-0.10,
+            postflop_continue_bias=-0.08,
+            trap_frequency=-0.10,
+        ),
+        BotProfile(
+            name="tight_aggressive",
+            tightness=0.66,
+            aggression=0.74,
+            bluff_freq=0.04,
+            preflop_defend_bias=-0.18,
+            postflop_continue_bias=-0.14,
+            trap_frequency=-0.06,
+        ),
+        BotProfile(
+            name="loose_aggressive",
+            tightness=0.48,
+            aggression=0.74,
+            bluff_freq=0.07,
+            preflop_defend_bias=0.10,
+            postflop_continue_bias=0.02,
+            trap_frequency=0.00,
+        ),
+        BotProfile(
+            name="tight_passive",
+            tightness=0.64,
+            aggression=0.42,
+            bluff_freq=0.02,
+            preflop_defend_bias=-0.24,
+            postflop_continue_bias=-0.20,
+            trap_frequency=-0.18,
+        ),
+        BotProfile(
+            name="loose_passive",
+            tightness=0.50,
+            aggression=0.40,
+            bluff_freq=0.04,
+            preflop_defend_bias=-0.06,
+            postflop_continue_bias=-0.10,
+            trap_frequency=-0.12,
+        ),
     ]
 
 

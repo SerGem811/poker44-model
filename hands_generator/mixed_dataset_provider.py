@@ -429,10 +429,10 @@ def _structure_distance(
         p6p_b,
     ) = b
     return (
-        abs(preflop_a - preflop_b) * 3.2
-        + abs(flop_a - flop_b) * 2.4
-        + abs(turn_a - turn_b) * 2.4
-        + abs(river_a - river_b) * 2.8
+        abs(preflop_a - preflop_b) * 8.0
+        + abs(flop_a - flop_b) * 5.5
+        + abs(turn_a - turn_b) * 6.5
+        + abs(river_a - river_b) * 7.5
         + abs(p2_a - p2_b) * 0.8
         + abs(p3_a - p3_b) * 0.8
         + abs(p4_a - p4_b) * 1.0
@@ -476,6 +476,13 @@ def _profiles_for_target_signature(
 
     tuned_profiles: List[BotProfile] = []
     for profile in bot_profiles:
+        street_early_bias = _clamp_profile_value((1.05 - target_streets) * 1.15, -0.30, 0.30)
+        fold_bias = _clamp_profile_value((target_folds - 4.7) * 0.08, -0.24, 0.24)
+        call_bias = _clamp_profile_value((target_calls - 0.72) * 0.14, -0.18, 0.18)
+        # Earlier target endings should push bots to continue less postflop, not more.
+        continue_bias = _clamp_profile_value((-1.0 * street_early_bias) + fold_bias - (0.40 * call_bias), -0.35, 0.28)
+        defend_bias = _clamp_profile_value((-0.55 * street_early_bias) + (0.80 * call_bias) - (0.30 * fold_bias), -0.28, 0.28)
+        trap_bias = _clamp_profile_value((target_streets - 1.12) * 0.55, -0.22, 0.16)
         tuned_profiles.append(
             BotProfile(
                 name=f"{profile.name}_targeted",
@@ -507,9 +514,52 @@ def _profiles_for_target_signature(
                     0.50,
                     1.10,
                 ),
+                preflop_defend_bias=_clamp_profile_value(
+                    profile.preflop_defend_bias + defend_bias,
+                    -1.0,
+                    1.0,
+                ),
+                postflop_continue_bias=_clamp_profile_value(
+                    profile.postflop_continue_bias + continue_bias,
+                    -1.0,
+                    1.0,
+                ),
+                trap_frequency=_clamp_profile_value(
+                    profile.trap_frequency + trap_bias,
+                    -1.0,
+                    1.0,
+                ),
             )
         )
     return tuned_profiles
+
+
+def _street_depth_gap(
+    a: Tuple[float, float, float, float, float, float, float, float, float],
+    b: Tuple[float, float, float, float, float, float, float, float, float],
+) -> float:
+    _, _, _, _, _, streets_a, _, _, _ = a
+    _, _, _, _, _, streets_b, _, _, _ = b
+    return abs(streets_a - streets_b)
+
+
+def _signature_axis_penalty(
+    a: Tuple[float, float, float, float, float, float, float, float, float],
+    b: Tuple[float, float, float, float, float, float, float, float, float],
+) -> float:
+    calls_a, checks_a, raises_a, folds_a, actions_a, streets_a, players_a, amount_a, pot_a = a
+    calls_b, checks_b, raises_b, folds_b, actions_b, streets_b, players_b, amount_b, pot_b = b
+    return (
+        abs(raises_a - raises_b) * 3.2
+        + abs(folds_a - folds_b) * 2.4
+        + abs(calls_a - calls_b) * 1.7
+        + abs(checks_a - checks_b) * 1.5
+        + abs(actions_a - actions_b) * 1.2
+        + abs(players_a - players_b) * 1.0
+        + abs(amount_a - amount_b) * 0.9
+        + abs(pot_a - pot_b) * 0.35
+        + abs(streets_a - streets_b) * 3.6
+    )
 
 
 def _chunk_features_for_shortcut_rule(hands: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -651,19 +701,55 @@ def _build_bot_chunks(
             )
             candidate_sig = _sanitized_chunk_behavior_signature(candidate_hands)
             candidate_structure = _chunk_structure_signature(candidate_hands)
-            dist = _signature_distance(candidate_sig, target_signature) + _structure_distance(
-                candidate_structure, target_structure
+            street_gap = _street_depth_gap(candidate_sig, target_signature)
+            dist = (
+                _signature_distance(candidate_sig, target_signature)
+                + _structure_distance(candidate_structure, target_structure)
+                + _signature_axis_penalty(candidate_sig, target_signature)
+                + (street_gap * 6.0)
             )
             if dist < best_dist:
                 best_dist = dist
                 best_hands = candidate_hands
-            if dist <= 0.16:
+            if street_gap <= 0.10 and dist <= 0.40:
                 break
 
         for hand in best_hands:
             hand["label"] = "bot"
         bot_chunks.append({"hands": best_hands, "is_bot": True})
     return bot_chunks
+
+
+def _compute_chunk_depth_summary(
+    labeled_chunks: List[Dict[str, Any]]
+) -> Dict[str, float]:
+    human_depths: List[float] = []
+    bot_depths: List[float] = []
+
+    for chunk in labeled_chunks:
+        signature = _sanitized_chunk_behavior_signature(chunk.get("hands", []))
+        street_depth = float(signature[5])
+        if chunk.get("is_bot", False):
+            bot_depths.append(street_depth)
+        else:
+            human_depths.append(street_depth)
+
+    if not human_depths or not bot_depths:
+        return {
+            "human_avg_streets_min": 0.0,
+            "human_avg_streets_max": 0.0,
+            "bot_avg_streets_min": 0.0,
+            "bot_avg_streets_max": 0.0,
+            "avg_streets_gap": 0.0,
+        }
+
+    return {
+        "human_avg_streets_min": min(human_depths),
+        "human_avg_streets_max": max(human_depths),
+        "bot_avg_streets_min": min(bot_depths),
+        "bot_avg_streets_max": max(bot_depths),
+        "avg_streets_gap": abs(sum(bot_depths) / len(bot_depths) - (sum(human_depths) / len(human_depths))),
+    }
 
 
 def build_mixed_labeled_chunks(
@@ -777,6 +863,7 @@ def build_mixed_labeled_chunks(
         "bot_generation_rounds": rounds,
         "selected_bot_generation_round": selected_round,
     }
+    stats.update(_compute_chunk_depth_summary(labeled_chunks))
     return labeled_chunks, dataset_hash, stats
 
 
