@@ -66,6 +66,11 @@ Optional tuning:
 - `POKER44_MINERS_PER_CYCLE` (default `16`; set `0` or a negative value to query all eligible miners)
 - `POKER44_TARGET_MINER_UIDS` (comma-separated UIDs, useful for controlled local tests)
 - `--neuron.timeout` (default `60s`, validator -> miner query timeout)
+- `--wandb.off` (disable Weights & Biases logging)
+- `--wandb.offline` (log to local offline Weights & Biases files only)
+- `--wandb.project_name` (default `poker44-validators`)
+- `--wandb.entity` (optional W&B entity/team)
+- `--wandb.notes` (optional run notes)
 
 ---
 
@@ -137,6 +142,13 @@ Per cycle, validator:
 2. Sanitizes payloads before sending to miners.
 3. Queries miners and scores returned `risk_scores`.
 4. Updates internal scores and attempts `set_weights` on-chain.
+
+Optional W&B integration:
+
+- Logs only aggregated validator telemetry.
+- Includes dataset hash, dataset statistics, forward-cycle summaries, reward summaries, and `set_weights` status.
+- Does not publish live chunks, private human data, or the validator's mixed evaluation dataset contents.
+- Public benchmark publication for miners is documented separately in [Public benchmark + W&B](./public-benchmark.md).
 
 Default production cadence:
 

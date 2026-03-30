@@ -87,11 +87,17 @@ Intended use:
 - Use it as human base data.
 - Generate bot hands with `hands_generator/bot_hands/generate_poker_data.py`.
 - Train your own model and features.
+- Optionally build and publish a public benchmark artifact with:
+  `python scripts/publish/publish_public_benchmark.py --skip-wandb`
 
 ### Validator evaluation data
 
 Validators should not rely on the public corpus for evaluation.  
 Set `POKER44_HUMAN_JSON_PATH` to a private local human dataset.
+
+The public benchmark builder uses only the repo public human corpus plus offline-generated
+bot chunks. It does not use validator-private human data and does not publish the live
+validator evaluation dataset.
 
 ---
 
@@ -109,6 +115,7 @@ Then follow:
 
 - [Validator setup](docs/validator.md)
 - [Miner setup](docs/miner.md)
+- [Public benchmark + W&B](docs/public-benchmark.md)
 
 Validated starting profile for production-like operation:
 

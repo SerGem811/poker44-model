@@ -29,12 +29,19 @@ async def forward(validator) -> None:
     try:
         await _run_forward_cycle(validator)
     except Exception:
+        wandb_helper = getattr(validator, "wandb_helper", None)
+        if wandb_helper is not None:
+            wandb_helper.log_error(
+                "forward_cycle_unexpected",
+                traceback.format_exc(),
+            )
         bt.logging.error(f"Unexpected error in forward cycle:\n{traceback.format_exc()}")
 
 
 async def _run_forward_cycle(validator) -> None:
     validator.forward_count = getattr(validator, "forward_count", 0) + 1
     bt.logging.info(f"[Forward #{validator.forward_count}] start")
+    wandb_helper = getattr(validator, "wandb_helper", None)
 
     if hasattr(validator.provider, "refresh_if_due"):
         validator.provider.refresh_if_due()
@@ -44,6 +51,18 @@ async def _run_forward_cycle(validator) -> None:
     batches = validator.provider.fetch_hand_batch(limit=chunk_limit)
     if not batches:
         bt.logging.info("No hands fetched from dataset; sleeping.")
+        if wandb_helper is not None:
+            wandb_helper.log_forward_summary(
+                forward_count=validator.forward_count,
+                chunk_count=0,
+                total_hands=0,
+                miner_count=0,
+                responded_count=0,
+                successful_miners=0,
+                dataset_hash=getattr(validator.provider, "dataset_hash", ""),
+                dataset_stats=getattr(validator.provider, "stats", {}),
+                extra={"forward/status": "no_batches"},
+            )
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -52,6 +71,18 @@ async def _run_forward_cycle(validator) -> None:
 
     if not miner_uids:
         bt.logging.info("No eligible miner UIDs available for this cycle.")
+        if wandb_helper is not None:
+            wandb_helper.log_forward_summary(
+                forward_count=validator.forward_count,
+                chunk_count=len(batches),
+                total_hands=sum(len(batch.hands) for batch in batches),
+                miner_count=0,
+                responded_count=0,
+                successful_miners=0,
+                dataset_hash=getattr(validator.provider, "dataset_hash", ""),
+                dataset_stats=getattr(validator.provider, "stats", {}),
+                extra={"forward/status": "no_eligible_miners"},
+            )
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -89,6 +120,12 @@ async def _run_forward_cycle(validator) -> None:
     
     bt.logging.info(f"Processing {len(chunks)} chunks with labels: {batch_labels} (1=bot, 0=human)")
     bt.logging.info(f"Chunk sizes: {[len(chunk) for chunk in chunks]}")
+    if wandb_helper is not None:
+        provider_stats = getattr(validator.provider, "stats", {})
+        wandb_helper.log_dataset_state(
+            dataset_hash=getattr(validator.provider, "dataset_hash", ""),
+            stats=provider_stats,
+        )
     
     # Create synapse with all chunks (now as list of dicts)
     synapse = DetectionSynapse(chunks=chunks)
@@ -158,6 +195,22 @@ async def _run_forward_cycle(validator) -> None:
     
     if not any(responses.values()):
         bt.logging.info("No miner responses this cycle.")
+        if wandb_helper is not None:
+            wandb_helper.log_forward_summary(
+                forward_count=validator.forward_count,
+                chunk_count=len(chunks),
+                total_hands=total_hands,
+                miner_count=len(axons),
+                responded_count=len(synapse_responses),
+                successful_miners=0,
+                dataset_hash=getattr(validator.provider, "dataset_hash", ""),
+                dataset_stats=getattr(validator.provider, "stats", {}),
+                extra={
+                    "forward/status": "no_valid_scores",
+                    "forward/human_chunk_count": sum(1 for label in batch_labels if label == 0),
+                    "forward/bot_chunk_count": sum(1 for label in batch_labels if label == 1),
+                },
+            )
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -169,6 +222,29 @@ async def _run_forward_cycle(validator) -> None:
     winner_uids, winner_rewards = _select_weight_targets(reward_map)
 
     validator.update_scores(winner_rewards, winner_uids)
+    if wandb_helper is not None:
+        successful_miners = sum(1 for scores in responses.values() if scores)
+        wandb_helper.log_forward_summary(
+            forward_count=validator.forward_count,
+            chunk_count=len(chunks),
+            total_hands=total_hands,
+            miner_count=len(axons),
+            responded_count=len(synapse_responses),
+            successful_miners=successful_miners,
+            dataset_hash=getattr(validator.provider, "dataset_hash", ""),
+            dataset_stats=getattr(validator.provider, "stats", {}),
+            extra={
+                "forward/status": "ok",
+                "forward/human_chunk_count": sum(1 for label in batch_labels if label == 0),
+                "forward/bot_chunk_count": sum(1 for label in batch_labels if label == 1),
+            },
+        )
+        wandb_helper.log_reward_summary(
+            reward_map=reward_map,
+            metrics_map=metrics_map,
+            winner_uids=[int(uid) for uid in winner_uids],
+            winner_rewards=[float(weight) for weight in winner_rewards],
+        )
     bt.logging.info(f"Rewards issued for {len(winner_rewards)} UID(s).")
     bt.logging.info(
         f"[Forward #{validator.forward_count}] complete. Sleeping {validator.poll_interval}s before next tick.",

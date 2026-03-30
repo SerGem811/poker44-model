@@ -115,6 +115,36 @@ def add_args(cls, parser: argparse.ArgumentParser) -> None:
         default=[],
         help="Optional allowlist of validator hotkeys permitted to query miners.",
     )
+    parser.add_argument(
+        "--wandb.off",
+        action="store_true",
+        default=False,
+        help="Disable Weights & Biases logging for this neuron.",
+    )
+    parser.add_argument(
+        "--wandb.offline",
+        action="store_true",
+        default=False,
+        help="Run Weights & Biases in offline mode.",
+    )
+    parser.add_argument(
+        "--wandb.project_name",
+        type=str,
+        default="poker44-validators",
+        help="Weights & Biases project name.",
+    )
+    parser.add_argument(
+        "--wandb.entity",
+        type=str,
+        default="",
+        help="Weights & Biases entity/team name.",
+    )
+    parser.add_argument(
+        "--wandb.notes",
+        type=str,
+        default="",
+        help="Optional notes to attach to the Weights & Biases run.",
+    )
 
 def add_validator_args(cls, parser: argparse.ArgumentParser) -> None:
     parser.add_argument(

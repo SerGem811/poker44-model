@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 from poker44 import __version__
 from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
+from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
 from hands_generator.mixed_dataset_provider import (
     DEFAULT_OUTPUT_PATH,
@@ -98,6 +99,18 @@ class Validator(BaseValidatorNeuron):
         self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
         self.prediction_buffer = {}
         self.label_buffer = {}
+        self.wandb_helper = ValidatorWandbHelper(
+            config=cfg,
+            validator_uid=self.resolve_uid(self.wallet.hotkey.ss58_address),
+            hotkey=self.wallet.hotkey.ss58_address,
+            version=__version__,
+            netuid=cfg.netuid,
+        )
+        self.wandb_helper.log_validator_startup(
+            dataset_cfg=self.dataset_cfg,
+            poll_interval=self.poll_interval,
+            reward_window=self.reward_window,
+        )
 
     def resolve_uid(self, hotkey: str) -> Optional[int]:
         try:
@@ -107,6 +120,14 @@ class Validator(BaseValidatorNeuron):
 
     async def forward(self, synapse=None):  # type: ignore[override]
         return await forward_cycle(self)
+
+    def __del__(self) -> None:
+        wandb_helper = getattr(self, "wandb_helper", None)
+        if wandb_helper is not None:
+            try:
+                wandb_helper.finish()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":  # pragma: no cover - manual execution

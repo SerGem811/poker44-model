@@ -160,6 +160,20 @@ Output:
 
 Validators evaluate with private human data (`POKER44_HUMAN_JSON_PATH`), not with the public training corpus.
 
+Optional public benchmark artifact generation:
+
+```bash
+python scripts/publish/publish_public_benchmark.py --skip-wandb
+```
+
+This produces a labeled benchmark built only from the public human corpus and offline-generated
+bot chunks, with the same sanitized hand schema miners see at inference time. It does not use
+the validator's private human dataset and does not expose the live validator batches.
+
+See also:
+
+- [Public benchmark + W&B](./public-benchmark.md)
+
 ---
 
 ## Health Checklist
