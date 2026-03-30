@@ -106,8 +106,63 @@ Expected output fields:
 
 - `risk_scores: List[float]` in `[0, 1]`
 - `predictions: List[bool]` (optional but recommended)
+- `model_manifest: Dict[str, Any]` (recommended; published automatically by the reference miner)
 
 Important: validator payloads are sanitized to remove label/identity leakage before querying miners.
+
+### Model Manifest
+
+Poker44 miners can publish a lightweight `model_manifest` without changing the current
+remote-inference evaluation flow. The validator still scores returned `risk_scores`; the
+manifest is for transparency and traceability.
+
+Recommended manifest fields:
+
+- `open_source`
+- `repo_url`
+- `repo_commit`
+- `model_name`
+- `model_version`
+- `framework`
+- `license`
+- `training_data_statement`
+- `training_data_sources`
+- `private_data_attestation`
+- `artifact_url` and `artifact_sha256` when a downloadable checkpoint exists
+- `implementation_sha256`
+
+Minimum fields for `transparent` compliance:
+
+- `open_source=true`
+- `repo_url`
+- `repo_commit`
+- `model_name`
+- `model_version`
+- `training_data_statement`
+- `private_data_attestation`
+
+If these fields are missing, the validator can still score the miner today, but the miner is
+classified as `opaque` rather than `transparent`.
+
+The reference miner reads these environment variables when available:
+
+- `POKER44_MODEL_OPEN_SOURCE`
+- `POKER44_MODEL_REPO_URL`
+- `POKER44_MODEL_REPO_COMMIT`
+- `POKER44_MODEL_NAME`
+- `POKER44_MODEL_VERSION`
+- `POKER44_MODEL_FRAMEWORK`
+- `POKER44_MODEL_LICENSE`
+- `POKER44_MODEL_ARTIFACT_URL`
+- `POKER44_MODEL_ARTIFACT_SHA256`
+- `POKER44_MODEL_CARD_URL`
+- `POKER44_MODEL_TRAINING_DATA_STATEMENT`
+- `POKER44_MODEL_TRAINING_DATA_SOURCES`
+- `POKER44_MODEL_PRIVATE_DATA_ATTESTATION`
+- `POKER44_MODEL_INFERENCE_MODE`
+- `POKER44_MODEL_NOTES`
+
+For the rationale behind these disclosures, see [Anti-Leakage Policy](./anti-leakage.md).
 
 ---
 

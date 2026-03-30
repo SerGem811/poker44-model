@@ -4,6 +4,7 @@
   <p>
     <a href="docs/validator.md">🔐 Validator Guide</a> &bull;
     <a href="docs/miner.md">🛠️ Miner Guide</a> &bull;
+    <a href="docs/anti-leakage.md">🛡️ Anti-Leakage</a> &bull;
     <a href="docs/roadmap.md">🗺️ Roadmap</a>
   </p>
 </div>
@@ -70,6 +71,7 @@ The subnet is designed to support production anti-bot workflows where suspicious
 
 - Receive chunked poker behavior payloads.
 - Return `risk_scores` and predicted labels for each chunk.
+- Publish a lightweight `model_manifest` describing the implementation behind the miner.
 - Compete on accuracy, calibration, low false positives, and robustness over time.
 
 ---
@@ -98,6 +100,22 @@ Set `POKER44_HUMAN_JSON_PATH` to a private local human dataset.
 The public benchmark builder uses only the repo public human corpus plus offline-generated
 bot chunks. It does not use validator-private human data and does not publish the live
 validator evaluation dataset.
+
+### Open-Source Miner Standard
+
+Poker44 now supports a lightweight `model_manifest` attached to normal miner responses.
+This does not change validator scoring or on-chain `set_weights`. It adds traceability for
+miners that want to make their models open source while the subnet keeps the current
+remote-inference evaluation loop.
+
+Recommended manifest fields:
+
+- public repo URL
+- repo commit or tag for the production version
+- model name and version
+- framework
+- license
+- optional artifact URL / artifact SHA256
 
 ---
 
@@ -132,6 +150,7 @@ Validated starting profile for production-like operation:
 
 - Validator docs: [`docs/validator.md`](docs/validator.md)
 - Miner docs: [`docs/miner.md`](docs/miner.md)
+- Anti-leakage policy: [`docs/anti-leakage.md`](docs/anti-leakage.md)
 - Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
 
 ---

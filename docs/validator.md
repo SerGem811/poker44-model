@@ -216,8 +216,30 @@ Per cycle, validator:
 
 1. Builds mixed labeled chunks from private human data + generated bot data.
 2. Sanitizes payloads before sending to miners.
-3. Queries miners and scores returned `risk_scores`.
+3. Queries miners, records any returned `model_manifest`, and scores returned `risk_scores`.
 4. Updates internal scores and attempts `set_weights` on-chain.
+
+## Model Manifest Registry
+
+Poker44 validators now persist miner model metadata separately from scoring. This does not
+change the reward loop. It records what each miner claims to be running.
+
+Current behavior:
+
+- manifests are optional for backward compatibility;
+- when present, they are normalized and stored under the validator state directory as
+  `model_manifests.json`;
+- validator compliance state is persisted separately in `compliance_registry.json`;
+- validator anti-leakage tracking also persists `suspicion_registry.json` and
+  `served_chunk_registry.json`;
+- a manifest change is detected by digest and logged once per update;
+- miners are classified as `transparent` or `opaque` based on minimum manifest fields;
+- missing or incomplete disclosure fields create suspicion events per UID;
+- served chunk fingerprints are tracked to monitor repeated exposure of evaluation payloads;
+- `set_weights` still depends on prediction quality, not on manifest presence.
+
+For the broader threat model and planned controls around leaked private data, memorization,
+and hardcoded miners, see [Anti-Leakage Policy](./anti-leakage.md).
 
 Optional W&B integration:
 

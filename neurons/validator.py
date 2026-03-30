@@ -32,6 +32,7 @@ from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
 from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
+from poker44.validator.integrity import load_json_registry
 from hands_generator.mixed_dataset_provider import (
     DEFAULT_OUTPUT_PATH,
     MixedDatasetConfig,
@@ -99,6 +100,24 @@ class Validator(BaseValidatorNeuron):
         self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
         self.prediction_buffer = {}
         self.label_buffer = {}
+        state_dir = Path(self.config.neuron.full_path)
+        self.model_manifest_path = state_dir / "model_manifests.json"
+        self.compliance_registry_path = state_dir / "compliance_registry.json"
+        self.suspicion_registry_path = state_dir / "suspicion_registry.json"
+        self.served_chunk_registry_path = state_dir / "served_chunk_registry.json"
+        self.model_manifest_registry = load_json_registry(self.model_manifest_path)
+        self.compliance_registry = load_json_registry(
+            self.compliance_registry_path,
+            default={"miners": {}, "summary": {}},
+        )
+        self.suspicion_registry = load_json_registry(
+            self.suspicion_registry_path,
+            default={"miners": {}, "summary": {}},
+        )
+        self.served_chunk_registry = load_json_registry(
+            self.served_chunk_registry_path,
+            default={"chunk_index": {}, "recent_cycles": [], "summary": {}},
+        )
         self.wandb_helper = ValidatorWandbHelper(
             config=cfg,
             validator_uid=self.resolve_uid(self.wallet.hotkey.ss58_address),

@@ -12,6 +12,16 @@ import bittensor as bt
 import numpy as np
 
 from poker44.score.scoring import reward
+from poker44.utils.model_manifest import manifest_digest, normalize_model_manifest
+from poker44.validator.integrity import (
+    chunk_fingerprint,
+    evaluate_manifest_compliance,
+    evaluate_manifest_suspicion,
+    persist_json_registry,
+    record_served_chunks,
+    update_compliance_registry,
+    update_suspicion_registry,
+)
 from poker44.validator.synapse import DetectionSynapse
 from poker44.validator.sanitization import sanitize_hand_for_miner
 
@@ -120,6 +130,11 @@ async def _run_forward_cycle(validator) -> None:
     
     bt.logging.info(f"Processing {len(chunks)} chunks with labels: {batch_labels} (1=bot, 0=human)")
     bt.logging.info(f"Chunk sizes: {[len(chunk) for chunk in chunks]}")
+    _record_served_chunk_fingerprints(
+        validator,
+        chunks=chunks,
+        dataset_hash=getattr(validator.provider, "dataset_hash", ""),
+    )
     if wandb_helper is not None:
         provider_stats = getattr(validator.provider, "stats", {})
         wandb_helper.log_dataset_state(
@@ -154,6 +169,13 @@ async def _run_forward_cycle(validator) -> None:
         if resp is None:
             bt.logging.debug(f"Miner {uid} returned None response")
             continue
+
+        _record_model_manifest(
+            validator,
+            uid,
+            getattr(resp, "model_manifest", None),
+            dataset_hash=getattr(validator.provider, "dataset_hash", ""),
+        )
             
         scores = getattr(resp, "risk_scores", None)
         if scores is None:
@@ -250,6 +272,149 @@ async def _run_forward_cycle(validator) -> None:
         f"[Forward #{validator.forward_count}] complete. Sleeping {validator.poll_interval}s before next tick.",
     )
     await asyncio.sleep(validator.poll_interval)
+
+
+def _record_model_manifest(
+    validator,
+    uid: int,
+    manifest: Dict[str, Any] | None,
+    *,
+    dataset_hash: str,
+) -> None:
+    normalized = normalize_model_manifest(manifest)
+    suspicion_reasons = evaluate_manifest_suspicion(normalized if normalized else None)
+    _record_suspicion(
+        validator,
+        uid,
+        reasons=suspicion_reasons,
+        dataset_hash=dataset_hash,
+    )
+    _record_compliance(
+        validator,
+        uid,
+        manifest=normalized if normalized else None,
+        dataset_hash=dataset_hash,
+    )
+
+    if not normalized:
+        bt.logging.debug(f"Miner {uid} did not provide a model manifest.")
+        return
+
+    digest = manifest_digest(normalized)
+    registry = getattr(validator, "model_manifest_registry", None)
+    if registry is None:
+        registry = {}
+        validator.model_manifest_registry = registry
+
+    previous = registry.get(uid)
+    previous_digest = previous.get("manifest_digest") if previous else None
+    if previous_digest == digest:
+        return
+
+    entry = {
+        "uid": int(uid),
+        "manifest_digest": digest,
+        "model_manifest": normalized,
+    }
+    registry[uid] = entry
+
+    bt.logging.info(
+        f"Miner {uid} manifest updated | "
+        f"open_source={normalized.get('open_source')} "
+        f"model={normalized.get('model_name', '')} "
+        f"version={normalized.get('model_version', '')} "
+        f"repo={normalized.get('repo_url', '')} "
+        f"commit={normalized.get('repo_commit', '')}"
+    )
+    _persist_model_manifest_registry(getattr(validator, "model_manifest_path", None), registry)
+
+
+def _persist_model_manifest_registry(path: str | Path | None, registry: Dict[int, Dict[str, Any]]) -> None:
+    payload = {
+        str(uid): registry[uid]
+        for uid in sorted(registry)
+    }
+    persist_json_registry(path, payload)
+
+
+def _record_served_chunk_fingerprints(validator, *, chunks: List[List[dict]], dataset_hash: str) -> None:
+    registry = getattr(validator, "served_chunk_registry", None)
+    if registry is None:
+        registry = {"chunk_index": {}, "recent_cycles": [], "summary": {}}
+        validator.served_chunk_registry = registry
+
+    chunk_hashes = [chunk_fingerprint(chunk) for chunk in chunks]
+    summary = record_served_chunks(
+        registry,
+        chunk_hashes=chunk_hashes,
+        forward_count=int(getattr(validator, "forward_count", 0)),
+        dataset_hash=dataset_hash,
+    )
+    persist_json_registry(getattr(validator, "served_chunk_registry_path", None), registry)
+
+    if summary["repeated_count"] > 0:
+        bt.logging.warning(
+            f"Forward #{getattr(validator, 'forward_count', 0)} reused "
+            f"{summary['repeated_count']} chunk fingerprints; "
+            f"{summary['unique_count']} unique chunk fingerprints tracked so far."
+        )
+
+
+def _record_suspicion(
+    validator,
+    uid: int,
+    *,
+    reasons: List[str],
+    dataset_hash: str,
+) -> None:
+    registry = getattr(validator, "suspicion_registry", None)
+    if registry is None:
+        registry = {"miners": {}, "summary": {}}
+        validator.suspicion_registry = registry
+
+    event = update_suspicion_registry(
+        registry,
+        uid=int(uid),
+        reasons=reasons,
+        forward_count=int(getattr(validator, "forward_count", 0)),
+        dataset_hash=dataset_hash,
+    )
+    if event is None:
+        return
+
+    bt.logging.warning(f"Miner {uid} anti-leakage suspicion flags: {', '.join(reasons)}")
+    persist_json_registry(getattr(validator, "suspicion_registry_path", None), registry)
+
+
+def _record_compliance(
+    validator,
+    uid: int,
+    *,
+    manifest: Dict[str, Any] | None,
+    dataset_hash: str,
+) -> None:
+    registry = getattr(validator, "compliance_registry", None)
+    if registry is None:
+        registry = {"miners": {}, "summary": {}}
+        validator.compliance_registry = registry
+
+    compliance = evaluate_manifest_compliance(manifest)
+    digest = manifest_digest(manifest or {})
+    entry = update_compliance_registry(
+        registry,
+        uid=int(uid),
+        compliance=compliance,
+        manifest_digest=digest,
+        forward_count=int(getattr(validator, "forward_count", 0)),
+        dataset_hash=dataset_hash,
+    )
+    persist_json_registry(getattr(validator, "compliance_registry_path", None), registry)
+
+    if entry.get("status_changed"):
+        bt.logging.info(
+            f"Miner {uid} compliance status changed to {entry['status']} "
+            f"(missing_fields={entry['missing_fields']})"
+        )
 
 
 def _get_candidate_miners(validator) -> Tuple[List[int], List]:
