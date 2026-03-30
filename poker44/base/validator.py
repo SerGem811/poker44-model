@@ -58,6 +58,7 @@ class BaseValidatorNeuron(BaseNeuron):
         # Set up initial scoring weights for validation
         bt.logging.info("Building validation weights.")
         self.scores = np.zeros(self.metagraph.n, dtype=np.float32)
+        self.axon = None
 
         # Init sync with the network. Updates the metagraph.
         self.sync()
