@@ -11,5 +11,5 @@ __all__ = [
 
 __version__ = "0.1.0"
 __spec_version__ = 1
-VALIDATOR_DEPLOY_VERSION = "0.1.0"
+VALIDATOR_DEPLOY_VERSION = "0.1.1"
 version_url = "https://raw.githubusercontent.com/Poker44/Poker44-subnet/refs/heads/main/poker44/__init__.py"
