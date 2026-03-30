@@ -196,7 +196,6 @@ hands_generator/human_hands/human_hands_old_small.json
 hands_generator/human_hands/human_hands_old.json
 hands_generator/bot_hands/bot_hands.json
 
-scripts/validator/update/
 scripts/miner/install_dependencies.sh
 scripts/validator/main/install_dependencies.sh
 testing/

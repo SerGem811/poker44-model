@@ -138,6 +138,7 @@ show_completion_info() {
   echo "1. Review scripts/validator/run/run_vali.sh and set wallet, hotkey, and private dataset path."
   echo "   source validator_env/bin/activate"
   echo "   ./scripts/validator/run/run_vali.sh"
+  echo "2. Optional: enable Poker44 auto-update with scripts/validator/update/auto_update_validator.sh"
 }
 
 main() {

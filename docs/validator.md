@@ -134,6 +134,82 @@ pm2 delete poker44_validator
 
 ---
 
+## Auto-Update
+
+Poker44 supports optional validator auto-update through a separate PM2 watcher process.
+
+How it works:
+
+- The watcher checks `origin/main` periodically.
+- It reads `VALIDATOR_DEPLOY_VERSION` from `poker44/__init__.py`.
+- It updates only when the remote deploy version is newer than the local one.
+- On update, it pulls the repo, reinstalls dependencies, and restarts the validator PM2 process.
+
+Files:
+
+- `scripts/validator/update/auto_update_validator.sh`
+- `scripts/validator/update/update_validator.sh`
+- `scripts/validator/update/update_full.sh`
+
+Recommended environment for the watcher:
+
+- `PROCESS_NAME` (default `poker44_validator`)
+- `WALLET_NAME`
+- `WALLET_HOTKEY`
+- `SUBTENSOR_PARAM` (default `--subtensor.network finney`)
+- `VALIDATOR_ENV_DIR` (default `validator_env`)
+- `VALIDATOR_EXTRA_ARGS`
+- `SLEEP_INTERVAL` (default `600`)
+- `TARGET_BRANCH` (default `main`)
+
+Start the watcher:
+
+```bash
+chmod +x scripts/validator/update/auto_update_validator.sh
+pm2 start --name poker44_auto_update \
+  --interpreter /bin/bash \
+  scripts/validator/update/auto_update_validator.sh
+pm2 save
+```
+
+Typical one-time setup:
+
+```bash
+PROCESS_NAME=poker44_validator \
+WALLET_NAME=p44_cold \
+WALLET_HOTKEY=p44_validator \
+SUBTENSOR_PARAM="--subtensor.network finney" \
+VALIDATOR_ENV_DIR=validator_env \
+SLEEP_INTERVAL=600 \
+pm2 start --name poker44_auto_update \
+  --interpreter /bin/bash \
+  scripts/validator/update/auto_update_validator.sh
+```
+
+Manual update:
+
+```bash
+chmod +x scripts/validator/update/update_validator.sh
+./scripts/validator/update/update_validator.sh
+```
+
+Stop or inspect:
+
+```bash
+pm2 logs poker44_auto_update
+pm2 restart poker44_auto_update --update-env
+pm2 stop poker44_auto_update
+pm2 delete poker44_auto_update
+```
+
+Notes:
+
+- Auto-update is optional.
+- Validators still control whether they enable the watcher.
+- Deploys are gated by `VALIDATOR_DEPLOY_VERSION`, not by every commit on `main`.
+
+---
+
 ## Runtime Behavior
 
 Per cycle, validator:

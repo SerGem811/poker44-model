@@ -117,6 +117,8 @@ Then follow:
 - [Miner setup](docs/miner.md)
 - [Public benchmark + W&B](docs/public-benchmark.md)
 
+Validator operators can also enable optional auto-update support. See [Validator setup](docs/validator.md).
+
 Validated starting profile for production-like operation:
 
 - `POKER44_CHUNK_COUNT=40`

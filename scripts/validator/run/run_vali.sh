@@ -8,6 +8,7 @@ NETUID="${NETUID:-126}"
 WALLET_NAME="${WALLET_NAME:-poker44-test-ck}"
 HOTKEY="${HOTKEY:-poker44-hk}"
 NETWORK="${NETWORK:-finney}"
+SUBTENSOR_PARAM="${SUBTENSOR_PARAM:-}"
 VALIDATOR_SCRIPT="${VALIDATOR_SCRIPT:-./neurons/validator.py}"
 PM2_NAME="${PM2_NAME:-poker44_validator}"  ##  name of validator, as you wish
 VALIDATOR_ENV_DIR="${VALIDATOR_ENV_DIR:-validator_env}"
@@ -62,16 +63,25 @@ export POKER44_CHUNK_COUNT="$POKER44_CHUNK_COUNT"
 export POKER44_REWARD_WINDOW="$POKER44_REWARD_WINDOW"
 export POKER44_POLL_INTERVAL_SECONDS="$POKER44_POLL_INTERVAL_SECONDS"
 export POKER44_MINERS_PER_CYCLE="$POKER44_MINERS_PER_CYCLE"
+export PM2_NAME="$PM2_NAME"
+export VALIDATOR_ENV_DIR="$VALIDATOR_ENV_DIR"
+
+if [ -n "$SUBTENSOR_PARAM" ]; then
+  read -r -a SUBTENSOR_ARG_ARRAY <<< "$SUBTENSOR_PARAM"
+else
+  SUBTENSOR_ARG_ARRAY=(--subtensor.network "$NETWORK")
+fi
 
 VALIDATOR_ARGS=(
   "$VALIDATOR_SCRIPT"
   --netuid "$NETUID"
   --wallet.name "$WALLET_NAME"
   --wallet.hotkey "$HOTKEY"
-  --subtensor.network "$NETWORK"
   --neuron.timeout "$NEURON_TIMEOUT"
   --logging.debug
 )
+
+VALIDATOR_ARGS+=("${SUBTENSOR_ARG_ARRAY[@]}")
 
 if [ -n "$WALLET_PATH" ]; then
   VALIDATOR_ARGS+=(--wallet.path "$WALLET_PATH")
@@ -91,5 +101,6 @@ pm2 save
 echo "Validator started: $PM2_NAME"
 echo "View logs: pm2 logs $PM2_NAME"
 echo "Config: netuid=$NETUID network=$NETWORK wallet=$WALLET_NAME hotkey=$HOTKEY python=$PYTHON_BIN"
+echo "Subtensor args: ${SUBTENSOR_PARAM:---subtensor.network $NETWORK}"
 echo "Runtime extras: wallet_path=${WALLET_PATH:-<default>} extra_args=${VALIDATOR_EXTRA_ARGS:-<none>}"
 echo "Profile: chunks=$POKER44_CHUNK_COUNT reward_window=$POKER44_REWARD_WINDOW poll_interval_s=$POKER44_POLL_INTERVAL_SECONDS miners_per_cycle=$POKER44_MINERS_PER_CYCLE timeout_s=$NEURON_TIMEOUT"

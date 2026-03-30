@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+IFS=$'\n\t'
+
+PROCESS_NAME="${PROCESS_NAME:-poker44_validator}"
+WALLET_NAME="${WALLET_NAME:-}"
+WALLET_HOTKEY="${WALLET_HOTKEY:-}"
+NETUID="${NETUID:-126}"
+SUBTENSOR_PARAM="${SUBTENSOR_PARAM:---subtensor.network finney}"
+VALIDATOR_ENV_DIR="${VALIDATOR_ENV_DIR:-validator_env}"
+VALIDATOR_EXTRA_ARGS="${VALIDATOR_EXTRA_ARGS:-}"
+TARGET_BRANCH="${TARGET_BRANCH:-main}"
+VALIDATOR_SCRIPT="${VALIDATOR_SCRIPT:-./neurons/validator.py}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+if [[ "$VALIDATOR_SCRIPT" != /* ]]; then
+  VALIDATOR_SCRIPT="$REPO_ROOT/${VALIDATOR_SCRIPT#./}"
+fi
+
+if [ -x "$REPO_ROOT/$VALIDATOR_ENV_DIR/bin/python" ]; then
+  PYTHON_BIN="$REPO_ROOT/$VALIDATOR_ENV_DIR/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python)"
+else
+  echo "Error: no Python interpreter found" >&2
+  exit 1
+fi
+
+echo "[INFO] Repo root: $REPO_ROOT"
+echo "[INFO] Branch: $TARGET_BRANCH"
+echo "[INFO] Process: $PROCESS_NAME"
+echo "[INFO] Python: $PYTHON_BIN"
+
+pushd "$REPO_ROOT" > /dev/null
+echo "[INFO] Pulling latest Poker44 code from origin/$TARGET_BRANCH..."
+git pull origin "$TARGET_BRANCH"
+popd > /dev/null
+
+if [ -x "$REPO_ROOT/$VALIDATOR_ENV_DIR/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/$VALIDATOR_ENV_DIR/bin/activate"
+fi
+
+echo "[INFO] Installing/updating Python dependencies..."
+if [ -f "$REPO_ROOT/requirements.txt" ]; then
+  pip install -r "$REPO_ROOT/requirements.txt"
+fi
+pip install -e "$REPO_ROOT"
+
+if [ -f "$REPO_ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/.env"
+  set +a
+fi
+
+echo "[INFO] Restarting PM2 process '$PROCESS_NAME'..."
+if ! pm2 restart "$PROCESS_NAME" --update-env; then
+  if [ -z "$WALLET_NAME" ] || [ -z "$WALLET_HOTKEY" ]; then
+    echo "[ERROR] PM2 process '$PROCESS_NAME' not found and wallet params are missing." >&2
+    echo "[ERROR] Set WALLET_NAME and WALLET_HOTKEY to create the validator process." >&2
+    exit 1
+  fi
+
+  read -r -a SUBTENSOR_ARG_ARRAY <<< "$SUBTENSOR_PARAM"
+  VALIDATOR_CMD=(
+    "$VALIDATOR_SCRIPT"
+    --netuid "$NETUID"
+    --wallet.name "$WALLET_NAME"
+    --wallet.hotkey "$WALLET_HOTKEY"
+    --logging.debug
+  )
+  VALIDATOR_CMD+=("${SUBTENSOR_ARG_ARRAY[@]}")
+
+  if [ -n "$VALIDATOR_EXTRA_ARGS" ]; then
+    read -r -a EXTRA_ARG_ARRAY <<< "$VALIDATOR_EXTRA_ARGS"
+    VALIDATOR_CMD+=("${EXTRA_ARG_ARRAY[@]}")
+  fi
+
+  echo "[WARN] PM2 restart failed; starting a new Poker44 validator process"
+  pm2 start "$PYTHON_BIN" --name "$PROCESS_NAME" -- "${VALIDATOR_CMD[@]}"
+fi
+
+echo "[INFO] Poker44 validator update completed"
