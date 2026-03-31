@@ -164,6 +164,13 @@ The reference miner reads these environment variables when available:
 
 For the rationale behind these disclosures, see [Anti-Leakage Policy](./anti-leakage.md).
 
+Startup behavior of the reference miner:
+
+- logs the published `model_manifest`
+- logs current `transparent` / `opaque` status and missing fields
+- logs benchmark/doc paths useful for miner preparation
+- logs the public benchmark command miners can use locally
+
 ---
 
 ## Production Access Policy

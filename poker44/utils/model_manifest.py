@@ -8,6 +8,16 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+MIN_REQUIRED_MANIFEST_FIELDS = [
+    "open_source",
+    "repo_url",
+    "repo_commit",
+    "model_name",
+    "model_version",
+    "training_data_statement",
+    "private_data_attestation",
+]
+
 
 def _parse_bool(value: str | None, *, default: bool = False) -> bool:
     if value is None:
@@ -160,3 +170,36 @@ def manifest_digest(manifest: Optional[Mapping[str, Any]]) -> str:
     normalized = normalize_model_manifest(manifest)
     payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def evaluate_manifest_compliance(manifest: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Classify whether a manifest meets the current transparent-miner standard."""
+    if not manifest:
+        return {
+            "status": "opaque",
+            "missing_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
+            "required_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
+            "open_source": False,
+        }
+
+    missing_fields: List[str] = []
+    for field in MIN_REQUIRED_MANIFEST_FIELDS:
+        value = manifest.get(field)
+        if field == "open_source":
+            if not bool(value):
+                missing_fields.append(field)
+            continue
+        if value is None:
+            missing_fields.append(field)
+            continue
+        if isinstance(value, str) and not value.strip():
+            missing_fields.append(field)
+            continue
+
+    status = "transparent" if not missing_fields else "opaque"
+    return {
+        "status": status,
+        "missing_fields": missing_fields,
+        "required_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
+        "open_source": bool(manifest.get("open_source", False)),
+    }

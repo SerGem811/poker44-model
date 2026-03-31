@@ -8,18 +8,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
 
+from poker44.utils.model_manifest import (
+    MIN_REQUIRED_MANIFEST_FIELDS,
+    evaluate_manifest_compliance,
+)
 
 UTC = timezone.utc
 MAX_RECENT_CYCLES = 64
-MIN_REQUIRED_MANIFEST_FIELDS = [
-    "open_source",
-    "repo_url",
-    "repo_commit",
-    "model_name",
-    "model_version",
-    "training_data_statement",
-    "private_data_attestation",
-]
 
 
 def load_json_registry(path: str | Path | None, *, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -136,38 +131,6 @@ def evaluate_manifest_suspicion(manifest: Optional[Mapping[str, Any]]) -> List[s
     if not str(manifest.get("private_data_attestation", "")).strip():
         reasons.append("manifest_missing_private_data_attestation")
     return reasons
-
-
-def evaluate_manifest_compliance(manifest: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    if not manifest:
-        return {
-            "status": "opaque",
-            "missing_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
-            "required_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
-            "open_source": False,
-        }
-
-    missing_fields: List[str] = []
-    for field in MIN_REQUIRED_MANIFEST_FIELDS:
-        value = manifest.get(field)
-        if field == "open_source":
-            if not bool(value):
-                missing_fields.append(field)
-            continue
-        if value is None:
-            missing_fields.append(field)
-            continue
-        if isinstance(value, str) and not value.strip():
-            missing_fields.append(field)
-            continue
-
-    status = "transparent" if not missing_fields else "opaque"
-    return {
-        "status": status,
-        "missing_fields": missing_fields,
-        "required_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
-        "open_source": bool(manifest.get("open_source", False)),
-    }
 
 
 def update_suspicion_registry(
