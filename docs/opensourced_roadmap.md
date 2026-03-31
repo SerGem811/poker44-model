@@ -144,6 +144,8 @@ At the moment:
 - there is **no reward penalty**
 - there is **no weight penalty**
 - there is **no rejection from evaluation**
+- the standard is **merged in the repo and pushed to GitHub**
+- the standard is **not yet deployed on validator servers**
 
 This phase is intentionally:
 
@@ -166,11 +168,14 @@ Behavior:
 - log `transparent` / `opaque`
 - persist compliance and suspicion registries
 - let miners adapt gradually
+- define the standard publicly before validator deployment
+- communicate that repo/docs are ready before production rollout
 
 Rationale:
 
 - avoid breaking participation too early
 - avoid penalizing miners before clear communication and transition time
+- give miners time to prepare before the standard is live on validator infrastructure
 
 ### Phase 2. Social / operational pressure
 
@@ -188,6 +193,7 @@ Possible additions:
 
 - explicit compliance summary in validator logs
 - separate reporting of transparent vs opaque miners
+- more visible communication of compliant vs non-compliant miner status
 
 ### Phase 3. Soft restrictions
 
@@ -217,6 +223,7 @@ Behavior:
 - weights or rewards can begin to incorporate compliance policy
 - `opaque` miners may become partially penalized
 - later, non-compliant miners may become fully ineligible
+- this future phase may also coincide with a higher miner emission share for compliant miners
 
 Important:
 
@@ -252,24 +259,55 @@ When resuming in another terminal, the next practical implementation target shou
 3. design and implement canary chunks / holdout strategy
 4. prepare future policy hooks for soft restrictions on `opaque` miners
 
-## Notes For Future Terminal Sessions
+## Current Deployment Status
 
-If a future Codex session resumes work from here, the key context is:
+Important for future sessions:
 
-- phase 1 is already implemented
-- architecture remains remote inference
-- compliance is tracked but not enforced
-- the next intended phase is still non-destructive and non-economic
-- future weight penalties should only happen after an explicit transition period
+- phase 1 code is already implemented in the repository
+- documentation is already updated in the repository
+- commit is already pushed to GitHub remote
+- validator servers are **not yet** updated to this version
 
-## Files To Review First In Future Session
+This means:
 
-- `opensourced_roadmap.md`
-- `docs/anti-leakage.md`
-- `docs/miner.md`
-- `docs/validator.md`
-- `poker44/utils/model_manifest.py`
-- `poker44/validator/integrity.py`
-- `poker44/validator/forward.py`
-- `neurons/validator.py`
-- `neurons/miner.py`
+- communication to miners should describe the standard as introduced/defined, not as already
+  live on validator infrastructure
+- miners can prepare now, before deployment
+- any future live behavior depends on validator rollout
+
+## Messaging Guidance For Miners
+
+When communicating this update to miners, the messaging should emphasize:
+
+- open-sourced model manifests
+- transparency
+- traceability
+- structured ecosystem standards
+- non-punitive rollout
+
+Messaging should **not** claim:
+
+- that validators are already enforcing the standard live, if deployment has not happened yet
+- that there is already a reward or weight penalty
+- that open source alone proves honesty
+
+Preferred messaging shape:
+
+- Poker44 is introducing an open-sourced model manifest standard
+- the standard does not change current scoring or `set_weights`
+- miners can already prepare by publishing manifests
+- transparent/opaque classification exists in the design and code
+- future compliance-based phases may later affect incentives
+
+Useful public links:
+
+- `https://github.com/Poker44/Poker44-subnet/blob/main/docs/miner.md`
+- `https://github.com/Poker44/Poker44-subnet/blob/main/docs/validator.md`
+- `https://github.com/Poker44/Poker44-subnet/blob/main/docs/anti-leakage.md`
+- `https://github.com/Poker44/Poker44-subnet/blob/main/docs/opensourced_roadmap.md`
+
+Preferred title style while validators are not yet deployed:
+
+- `Poker44 miner update: Poker44 is introducing open-sourced model manifests`
+
+Avoid title styles that imply live production rollout if validators are not yet upgraded.

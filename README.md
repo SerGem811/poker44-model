@@ -151,6 +151,7 @@ Validated starting profile for production-like operation:
 - Validator docs: [`docs/validator.md`](docs/validator.md)
 - Miner docs: [`docs/miner.md`](docs/miner.md)
 - Anti-leakage policy: [`docs/anti-leakage.md`](docs/anti-leakage.md)
+- Open-sourced roadmap: [`docs/opensourced_roadmap.md`](docs/opensourced_roadmap.md)
 - Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
 
 ---
