@@ -36,6 +36,9 @@ Concretely, `pull + restart` means:
 - it runs backend migrations
 - it starts or restarts the provider backend and frontend under PM2
 - it derives a stable validator/provider id and fixed room code if they were not provided
+- it refuses legacy public setups that expose the provider through raw IP / plain HTTP unless explicitly overridden
+- it aligns provider cookies and CORS for `*.poker44.net` hosts automatically
+- it opens `80/tcp` and `443/tcp` in `ufw` automatically when available
 - it ensures a provider table exists
 - that table becomes visible through the public directory
 - hands generated on that table are persisted in the validator's own PostgreSQL
@@ -112,6 +115,8 @@ Important defaults:
 - `POKER44_PROVIDER_RUNTIME_BRANCH=dev`
 - `POKER44_PROVIDER_BACKEND_DOCKER_UP=true`
 - `POKER44_PROVIDER_RUN_MIGRATIONS=true`
+- `POKER44_PROVIDER_CENTRAL_AUTH_ORIGIN=https://dev.poker44.net`
+- `POKER44_PROVIDER_UFW_MANAGE=true`
 
 The validator itself does not talk directly to the global coordinator.
 
@@ -144,12 +149,14 @@ The validator bootstrap can manage these values automatically if they are not pr
 - `POKER44_PROVIDER_FRONTEND_REPO_URL`
 - `POKER44_PROVIDER_RUNTIME_BRANCH`
 - `POKER44_PROVIDER_PUBLIC_HOST`
-- `POKER44_PROVIDER_PUBLIC_BASE_URL`
+- `POKER44_PROVIDER_PUBLIC_BASE_URL` for the browser-facing `https` host
+- `POKER44_PROVIDER_PUBLIC_API_BASE_URL` when API/WS are exposed on a different public origin
 - `POKER44_PROVIDER_BACKEND_PORT`
 - `POKER44_PROVIDER_FRONTEND_PORT`
 - `POKER44_PROVIDER_DATABASE_URL`
 - `POKER44_PROVIDER_REDIS_URL`
 - `POKER44_PROVIDER_JWT_SECRET`
+- `POKER44_PROVIDER_COOKIE_DOMAIN`
 - `POKER44_PROVIDER_FIXED_ROOM_CODE`
 
 Useful overrides:
@@ -157,10 +164,17 @@ Useful overrides:
 - `POKER44_PROVIDER_VALIDATOR_ID`
 - `POKER44_PROVIDER_PUBLIC_HOST`
 - `POKER44_PROVIDER_PUBLIC_BASE_URL`
+- `POKER44_PROVIDER_PUBLIC_API_BASE_URL`
 - `POKER44_PROVIDER_BACKEND_PORT`
 - `POKER44_PROVIDER_FRONTEND_PORT`
 - `POKER44_PROVIDER_DATABASE_URL`
 - `POKER44_PROVIDER_REDIS_URL`
+- `POKER44_PROVIDER_SHARED_JWT_SECRET`
+- `POKER44_PROVIDER_COOKIE_DOMAIN`
+- `POKER44_PROVIDER_CENTRAL_AUTH_ORIGIN`
+- `POKER44_PROVIDER_EXTRA_CORS_ORIGINS`
+- `POKER44_PROVIDER_UFW_MANAGE`
+- `POKER44_PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL`
 - `POKER44_PROVIDER_SKIP_FRONTEND`
 - `POKER44_PROVIDER_GIT_PULL`
 - `POKER44_PROVIDER_BACKEND_PM2_NAME`
@@ -191,6 +205,17 @@ HOTKEY=p44_validator \
 POKER44_RUNTIME_MODE=provider_runtime \
 ./scripts/validator/run/run_vali.sh
 ```
+
+Recommended public-provider env for dev:
+
+```bash
+POKER44_PROVIDER_PUBLIC_BASE_URL=https://provider-<validator>.dev.poker44.net
+POKER44_PROVIDER_SHARED_JWT_SECRET='<same JWT secret as central dev backend>'
+POKER44_PROVIDER_COOKIE_DOMAIN=.poker44.net
+POKER44_PROVIDER_CENTRAL_AUTH_ORIGIN=https://dev.poker44.net
+```
+
+If the operator does not set a proper `https` hostname, the bootstrap now fails fast instead of silently deploying a provider that will later timeout on `Join`.
 
 Script path:
 

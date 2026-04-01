@@ -29,9 +29,16 @@ INTERNAL_EVAL_SECRET="${POKER44_PROVIDER_INTERNAL_SECRET:-force-start-secret}"
 EVAL_COORDINATOR_BASE_URL="${POKER44_EVAL_COORDINATOR_BASE_URL:-http://185.196.20.208:4010}"
 PROVIDER_PUBLIC_HOST="${POKER44_PROVIDER_PUBLIC_HOST:-}"
 PROVIDER_PUBLIC_BASE_URL="${POKER44_PROVIDER_PUBLIC_BASE_URL:-}"
+PROVIDER_PUBLIC_API_BASE_URL="${POKER44_PROVIDER_PUBLIC_API_BASE_URL:-}"
 PROVIDER_VALIDATOR_ID="${POKER44_PROVIDER_VALIDATOR_ID:-}"
 PROVIDER_FIXED_ROOM_CODE="${POKER44_PROVIDER_FIXED_ROOM_CODE:-}"
 PROVIDER_JWT_SECRET="${POKER44_PROVIDER_JWT_SECRET:-}"
+PROVIDER_SHARED_JWT_SECRET="${POKER44_PROVIDER_SHARED_JWT_SECRET:-}"
+PROVIDER_COOKIE_DOMAIN="${POKER44_PROVIDER_COOKIE_DOMAIN:-}"
+PROVIDER_CENTRAL_AUTH_ORIGIN="${POKER44_PROVIDER_CENTRAL_AUTH_ORIGIN:-https://dev.poker44.net}"
+PROVIDER_EXTRA_CORS_ORIGINS="${POKER44_PROVIDER_EXTRA_CORS_ORIGINS:-}"
+PROVIDER_UFW_MANAGE="${POKER44_PROVIDER_UFW_MANAGE:-true}"
+PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL="${POKER44_PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL:-false}"
 MIN_EVAL_HANDS="${POKER44_PROVIDER_MIN_EVAL_HANDS:-70}"
 MAX_EVAL_HANDS="${POKER44_PROVIDER_MAX_EVAL_HANDS:-120}"
 
@@ -106,6 +113,49 @@ derive_public_host() {
 
   echo "Could not determine provider public host. Set POKER44_PROVIDER_PUBLIC_HOST." >&2
   exit 1
+}
+
+derive_cookie_domain() {
+  local host="$1"
+  local normalized
+  normalized="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  case "$normalized" in
+    *.poker44.net)
+      printf '.poker44.net'
+      return
+      ;;
+  esac
+  printf ''
+}
+
+is_ip_literal() {
+  local host="$1"
+  if printf '%s' "$host" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    return 0
+  fi
+  if printf '%s' "$host" | grep -Eq '^[0-9a-fA-F:]+$'; then
+    return 0
+  fi
+  return 1
+}
+
+ensure_public_access_rules() {
+  if ! is_true "$PROVIDER_UFW_MANAGE"; then
+    return
+  fi
+  if ! command -v ufw >/dev/null 2>&1; then
+    return
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    log "Skipping UFW rule management because bootstrap is not running as root"
+    return
+  fi
+
+  log "Ensuring UFW rules for provider public access"
+  ufw allow "${BACKEND_PORT}/tcp" >/dev/null 2>&1 || true
+  ufw allow "${FRONTEND_PORT}/tcp" >/dev/null 2>&1 || true
+  ufw allow 80/tcp >/dev/null 2>&1 || true
+  ufw allow 443/tcp >/dev/null 2>&1 || true
 }
 
 hash_value() {
@@ -198,6 +248,79 @@ else
 fi
 BACKEND_PUBLIC_BASE_URL="http://$PUBLIC_HOST:$BACKEND_PORT"
 
+if [ -n "$PROVIDER_PUBLIC_API_BASE_URL" ]; then
+  PUBLIC_API_BASE_URL="${PROVIDER_PUBLIC_API_BASE_URL%/}"
+else
+  PUBLIC_API_BASE_URL="$FRONTEND_PUBLIC_BASE_URL"
+fi
+
+PUBLIC_BASE_HOST="$(python3 - "$FRONTEND_PUBLIC_BASE_URL" <<'PY'
+from urllib.parse import urlparse
+import sys
+value = sys.argv[1]
+try:
+    print(urlparse(value).hostname or "")
+except Exception:
+    print("")
+PY
+)"
+
+PUBLIC_BASE_SCHEME="$(python3 - "$FRONTEND_PUBLIC_BASE_URL" <<'PY'
+from urllib.parse import urlparse
+import sys
+value = sys.argv[1]
+try:
+    print(urlparse(value).scheme or "")
+except Exception:
+    print("")
+PY
+)"
+
+PUBLIC_API_HOST="$(python3 - "$PUBLIC_API_BASE_URL" <<'PY'
+from urllib.parse import urlparse
+import sys
+value = sys.argv[1]
+try:
+    print(urlparse(value).hostname or "")
+except Exception:
+    print("")
+PY
+)"
+
+PUBLIC_API_SCHEME="$(python3 - "$PUBLIC_API_BASE_URL" <<'PY'
+from urllib.parse import urlparse
+import sys
+value = sys.argv[1]
+try:
+    print(urlparse(value).scheme or "")
+except Exception:
+    print("")
+PY
+)"
+
+if ! is_true "$PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL"; then
+  if [ "$PUBLIC_BASE_SCHEME" != "https" ]; then
+    echo "Public provider base URL must use https. Set POKER44_PROVIDER_PUBLIC_BASE_URL to your https host or explicitly set POKER44_PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL=true." >&2
+    exit 1
+  fi
+  if [ -n "$PUBLIC_BASE_HOST" ] && is_ip_literal "$PUBLIC_BASE_HOST"; then
+    echo "Public provider base URL must not be a raw IP address. Use a real https hostname such as provider-<id>.dev.poker44.net or explicitly set POKER44_PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL=true." >&2
+    exit 1
+  fi
+  if [ "$PUBLIC_API_SCHEME" != "https" ]; then
+    echo "Public provider API base URL must use https. Set POKER44_PROVIDER_PUBLIC_API_BASE_URL to your public https API origin or explicitly set POKER44_PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL=true." >&2
+    exit 1
+  fi
+  if [ -n "$PUBLIC_API_HOST" ] && is_ip_literal "$PUBLIC_API_HOST"; then
+    echo "Public provider API base URL must not be a raw IP address. Use a real https hostname or explicitly set POKER44_PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL=true." >&2
+    exit 1
+  fi
+fi
+
+if [ -z "$PROVIDER_COOKIE_DOMAIN" ] && [ -n "$PUBLIC_BASE_HOST" ]; then
+  PROVIDER_COOKIE_DOMAIN="$(derive_cookie_domain "$PUBLIC_BASE_HOST")"
+fi
+
 if [ -z "$PROVIDER_VALIDATOR_ID" ]; then
   PROVIDER_VALIDATOR_ID="$PUBLIC_HOST"
 fi
@@ -205,8 +328,14 @@ if [ -z "$PROVIDER_FIXED_ROOM_CODE" ]; then
   PROVIDER_FIXED_ROOM_CODE="$(derive_fixed_room_code "$PROVIDER_VALIDATOR_ID")"
 fi
 if [ -z "$PROVIDER_JWT_SECRET" ]; then
-  PROVIDER_JWT_SECRET="$(derive_jwt_secret "$PROVIDER_VALIDATOR_ID")"
+  if [ -n "$PROVIDER_SHARED_JWT_SECRET" ]; then
+    PROVIDER_JWT_SECRET="$PROVIDER_SHARED_JWT_SECRET"
+  else
+    PROVIDER_JWT_SECRET="$(derive_jwt_secret "$PROVIDER_VALIDATOR_ID")"
+  fi
 fi
+
+ensure_public_access_rules
 
 ensure_repo "$BACKEND_DIR" "$BACKEND_REPO_URL" "$RUNTIME_BRANCH"
 if ! is_true "$SKIP_FRONTEND"; then
@@ -221,7 +350,14 @@ upsert_env_line "$BACKEND_DIR/.env" "REDIS_URL" "$REDIS_URL"
 upsert_env_line "$BACKEND_DIR/.env" "JWT_SECRET" "$PROVIDER_JWT_SECRET"
 upsert_env_line "$BACKEND_DIR/.env" "JWT_EXPIRES_IN" "7d"
 upsert_env_line "$BACKEND_DIR/.env" "COOKIE_MAX_AGE" "604800000"
-upsert_env_line "$BACKEND_DIR/.env" "CORS_ORIGINS" "$FRONTEND_PUBLIC_BASE_URL,$BACKEND_PUBLIC_BASE_URL,http://localhost:$FRONTEND_PORT,http://127.0.0.1:$FRONTEND_PORT"
+if [ -n "$PROVIDER_COOKIE_DOMAIN" ]; then
+  upsert_env_line "$BACKEND_DIR/.env" "COOKIE_DOMAIN" "$PROVIDER_COOKIE_DOMAIN"
+fi
+BASE_CORS_ORIGINS="$FRONTEND_PUBLIC_BASE_URL,$PUBLIC_API_BASE_URL,$PROVIDER_CENTRAL_AUTH_ORIGIN,http://localhost:$FRONTEND_PORT,http://127.0.0.1:$FRONTEND_PORT"
+if [ -n "$PROVIDER_EXTRA_CORS_ORIGINS" ]; then
+  BASE_CORS_ORIGINS="$BASE_CORS_ORIGINS,$PROVIDER_EXTRA_CORS_ORIGINS"
+fi
+upsert_env_line "$BACKEND_DIR/.env" "CORS_ORIGINS" "$BASE_CORS_ORIGINS"
 upsert_env_line "$BACKEND_DIR/.env" "LOG_TO_FILE" "false"
 upsert_env_line "$BACKEND_DIR/.env" "PROVIDER_PLATFORM_URL" "$FRONTEND_PUBLIC_BASE_URL"
 upsert_env_line "$BACKEND_DIR/.env" "POKER44_VALIDATOR_ID" "$PROVIDER_VALIDATOR_ID"
@@ -233,9 +369,9 @@ upsert_env_line "$BACKEND_DIR/.env" "POKER44_PROVIDER_MAX_EVAL_HANDS" "$MAX_EVAL
 
 if ! is_true "$SKIP_FRONTEND"; then
   log "Writing provider frontend env"
-  upsert_env_line "$FRONTEND_DIR/.env.local" "NEXT_PUBLIC_API_URL" "$BACKEND_PUBLIC_BASE_URL/api/v1"
-  upsert_env_line "$FRONTEND_DIR/.env.local" "NEXT_PUBLIC_WS_URL" "$BACKEND_PUBLIC_BASE_URL"
-  upsert_env_line "$FRONTEND_DIR/.env.local" "NEXT_PUBLIC_DIRECTORY_URL" "$BACKEND_PUBLIC_BASE_URL"
+  upsert_env_line "$FRONTEND_DIR/.env.local" "NEXT_PUBLIC_API_URL" "$PUBLIC_API_BASE_URL/api/v1"
+  upsert_env_line "$FRONTEND_DIR/.env.local" "NEXT_PUBLIC_WS_URL" "$PUBLIC_API_BASE_URL"
+  upsert_env_line "$FRONTEND_DIR/.env.local" "NEXT_PUBLIC_DIRECTORY_URL" "$PUBLIC_API_BASE_URL"
 fi
 
 log "Bootstrapping provider backend in $BACKEND_DIR"
