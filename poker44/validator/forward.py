@@ -23,7 +23,7 @@ from poker44.validator.integrity import (
     update_suspicion_registry,
 )
 from poker44.validator.synapse import DetectionSynapse
-from poker44.validator.sanitization import sanitize_hand_for_miner
+from poker44.validator.sanitization import prepare_hand_for_miner
 
 from poker44.validator.constants import (
     BURN_EMISSIONS,
@@ -93,6 +93,7 @@ async def _run_forward_cycle(validator) -> None:
                 dataset_stats=getattr(validator.provider, "stats", {}),
                 extra={"forward/status": "no_eligible_miners"},
             )
+        _finalize_provider_cycle(validator)
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -119,7 +120,7 @@ async def _run_forward_cycle(validator) -> None:
                     else:
                         hand_payload = hand.__dict__
 
-            chunk_dicts.append(sanitize_hand_for_miner(hand_payload))
+            chunk_dicts.append(prepare_hand_for_miner(hand_payload))
         
         chunks.append(chunk_dicts)
         
@@ -233,6 +234,7 @@ async def _run_forward_cycle(validator) -> None:
                     "forward/bot_chunk_count": sum(1 for label in batch_labels if label == 1),
                 },
             )
+        _finalize_provider_cycle(validator)
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -268,10 +270,21 @@ async def _run_forward_cycle(validator) -> None:
             winner_rewards=[float(weight) for weight in winner_rewards],
         )
     bt.logging.info(f"Rewards issued for {len(winner_rewards)} UID(s).")
+    _finalize_provider_cycle(validator)
     bt.logging.info(
         f"[Forward #{validator.forward_count}] complete. Sleeping {validator.poll_interval}s before next tick.",
     )
     await asyncio.sleep(validator.poll_interval)
+
+
+def _finalize_provider_cycle(validator) -> None:
+    mark_evaluated = getattr(validator.provider, "mark_last_batch_evaluated", None)
+    if not callable(mark_evaluated):
+        return
+    try:
+        mark_evaluated()
+    except Exception as exc:
+        bt.logging.warning(f"Provider runtime finalization failed: {exc}")
 
 
 def _record_model_manifest(

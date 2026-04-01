@@ -1,16 +1,65 @@
-# 🔐 Poker44 Validator Guide
+# Poker44 Validator Guide
 
-Production validator guide for Poker44 subnet `126`.
+Validator guide for Poker44 subnet `126`.
 
----
+## Current Model
+
+The validator now has one intended operating model:
+
+- the validator runs in `provider_runtime`
+- the validator bootstrap manages a local provider runtime on the same server
+- the local provider runtime creates or ensures a public table
+- hands are stored in the validator's own PostgreSQL
+- the local provider backend publishes chunk candidates to a shared eval coordinator
+- all validators consume the same canonical chunk from that coordinator
+- validators then evaluate miners, compute rewards, and set weights on-chain
+
+The old `mixed_dataset` mode still exists in code for compatibility, but it is no longer the target operating path.
+
+## Pull + Restart Contract
+
+This is the operational promise of the new validator flow.
+
+When a validator operator does only:
+
+1. `git pull`
+2. restart the validator process
+
+the system should do the rest automatically.
+
+Concretely, `pull + restart` means:
+
+- the validator starts in `provider_runtime`
+- the bootstrap clones or updates `poker44-platform-backend` and `poker44-platform-frontend` under `.poker44-provider-runtime/`
+- it writes the provider `.env` files automatically
+- it starts provider dependencies if needed
+- it runs backend migrations
+- it starts or restarts the provider backend and frontend under PM2
+- it derives a stable validator/provider id and fixed room code if they were not provided
+- it ensures a provider table exists
+- that table becomes visible through the public directory
+- hands generated on that table are persisted in the validator's own PostgreSQL
+- when the provider has enough usable hands, it builds a sanitized chunk candidate
+- that candidate is published to the shared eval coordinator
+- if a canonical chunk for the current 2h window already exists, the provider uses that one instead
+- the validator consumes the coordinator's active chunk
+- the validator sends that same chunk to miners
+- the validator computes rewards and sets weights
+
+Important:
+
+- every validator keeps its own SQL locally
+- every validator/provider backend must point to the same eval coordinator
+- all validators must share the same `INTERNAL_EVAL_SECRET` expected by that coordinator
 
 ## Requirements
 
-- Linux (Ubuntu 22.04+ recommended)
+- Linux server
 - Python 3.10+
-- Registered validator hotkey on netuid `126`
-
----
+- Node.js and npm
+- PM2
+- Docker and Docker Compose for bundled provider Postgres/Redis, unless the operator uses their own services
+- registered validator hotkey on netuid `126`
 
 ## Install
 
@@ -24,17 +73,13 @@ pip install -e .
 pip install bittensor-cli
 ```
 
-Or use the helper script:
+Or use:
 
 ```bash
 ./scripts/validator/main/setup.sh
 ```
 
----
-
 ## Registration
-
-`btcli` is provided by the separate `bittensor-cli` package.
 
 ```bash
 btcli subnet register \
@@ -46,84 +91,114 @@ btcli subnet register \
 btcli wallet overview --wallet.name p44_cold --subtensor.network finney
 ```
 
----
-
 ## Required Environment
 
 Mandatory:
 
-- `POKER44_HUMAN_JSON_PATH` (private local human dataset JSON)
+- `POKER44_RUNTIME_MODE=provider_runtime`
+- `WALLET_NAME`
+- `HOTKEY`
 
-Optional tuning:
+Provider runtime defaults are already wired for the intended flow.
 
-- `POKER44_DATASET_REFRESH_SECONDS` (default `3600`)
-- `POKER44_POLL_INTERVAL_SECONDS` (default `300`)
-- `POKER44_REWARD_WINDOW` (default `40`)
-- `POKER44_CHUNK_COUNT` (default `40`)
-- `POKER44_MIN_HANDS_PER_CHUNK` (default `60`)
-- `POKER44_MAX_HANDS_PER_CHUNK` (default `120`)
-- `POKER44_HUMAN_RATIO` (default `0.5`)
-- `POKER44_MINERS_PER_CYCLE` (default `16`; set `0` or a negative value to query all eligible miners)
-- `POKER44_TARGET_MINER_UIDS` (comma-separated UIDs, useful for controlled local tests)
-- `--neuron.timeout` (default `60s`, validator -> miner query timeout)
-- `--wandb.off` (disable Weights & Biases logging)
-- `--wandb.offline` (log to local offline Weights & Biases files only)
-- `--wandb.project_name` (default `poker44-validators`)
-- `--wandb.entity` (optional W&B entity/team)
-- `--wandb.notes` (optional run notes)
+Important defaults:
 
----
+- `POKER44_PROVIDER_API_BASE_URL=http://127.0.0.1:4001`
+- `POKER44_PROVIDER_INTERNAL_SECRET=force-start-secret`
+- `POKER44_PROVIDER_MIN_EVAL_HANDS=70`
+- `POKER44_PROVIDER_MAX_EVAL_HANDS=120`
+- `POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT=true`
+- `POKER44_EVAL_COORDINATOR_BASE_URL=http://185.196.20.208:4010`
+- `POKER44_PROVIDER_RUNTIME_BRANCH=dev`
+- `POKER44_PROVIDER_BACKEND_DOCKER_UP=true`
+- `POKER44_PROVIDER_RUN_MIGRATIONS=true`
+
+The validator itself does not talk directly to the global coordinator.
+
+The flow is:
+
+- validator -> local provider backend
+- local provider backend -> shared eval coordinator
+
+## Shared Coordinator Rule
+
+If you want all validators to evaluate miners with the same chunk, all provider backends must use the same:
+
+- `EVAL_COORDINATOR_BASE_URL`
+- `INTERNAL_EVAL_SECRET`
+
+Today, the intended coordinator is:
+
+- `http://185.196.20.208:4010`
+
+That is the single source of truth for the active chunk of each 2-hour window.
+
+## What Gets Automated
+
+The validator bootstrap can manage these values automatically if they are not provided:
+
+- `POKER44_PROVIDER_RUNTIME_ROOT`
+- `POKER44_PROVIDER_BACKEND_DIR`
+- `POKER44_PROVIDER_FRONTEND_DIR`
+- `POKER44_PROVIDER_BACKEND_REPO_URL`
+- `POKER44_PROVIDER_FRONTEND_REPO_URL`
+- `POKER44_PROVIDER_RUNTIME_BRANCH`
+- `POKER44_PROVIDER_PUBLIC_HOST`
+- `POKER44_PROVIDER_PUBLIC_BASE_URL`
+- `POKER44_PROVIDER_BACKEND_PORT`
+- `POKER44_PROVIDER_FRONTEND_PORT`
+- `POKER44_PROVIDER_DATABASE_URL`
+- `POKER44_PROVIDER_REDIS_URL`
+- `POKER44_PROVIDER_JWT_SECRET`
+- `POKER44_PROVIDER_FIXED_ROOM_CODE`
+
+Useful overrides:
+
+- `POKER44_PROVIDER_VALIDATOR_ID`
+- `POKER44_PROVIDER_PUBLIC_HOST`
+- `POKER44_PROVIDER_PUBLIC_BASE_URL`
+- `POKER44_PROVIDER_BACKEND_PORT`
+- `POKER44_PROVIDER_FRONTEND_PORT`
+- `POKER44_PROVIDER_DATABASE_URL`
+- `POKER44_PROVIDER_REDIS_URL`
+- `POKER44_PROVIDER_SKIP_FRONTEND`
+- `POKER44_PROVIDER_GIT_PULL`
+- `POKER44_PROVIDER_BACKEND_PM2_NAME`
+- `POKER44_PROVIDER_FRONTEND_PM2_NAME`
+- `POKER44_PROVIDER_BOOTSTRAP_RETRY_SECONDS`
+- `POKER44_PROVIDER_BOOTSTRAP_MAX_ATTEMPTS`
+- `POKER44_PROVIDER_HEALTH_TIMEOUT_SECONDS`
+- `POKER44_PROVIDER_HEALTH_POLL_INTERVAL_SECONDS`
+- `POKER44_PROVIDER_ENSURE_ROOM_INTERVAL_SECONDS`
+- `POKER44_PROVIDER_REQUEST_TIMEOUT_SECONDS`
+
+Subnet-side evaluation tuning still applies:
+
+- `POKER44_CHUNK_COUNT`
+- `POKER44_REWARD_WINDOW`
+- `POKER44_POLL_INTERVAL_SECONDS`
+- `POKER44_MINERS_PER_CYCLE`
+- `POKER44_TARGET_MINER_UIDS`
+- `--neuron.timeout`
 
 ## Run Validator
 
-### PM2 command
-
-```bash
-POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
-POKER44_CHUNK_COUNT=40 \
-POKER44_REWARD_WINDOW=40 \
-POKER44_POLL_INTERVAL_SECONDS=300 \
-POKER44_MINERS_PER_CYCLE=16 \
-pm2 start python --name poker44_validator -- \
-  ./neurons/validator.py \
-  --netuid 126 \
-  --wallet.name p44_cold \
-  --wallet.hotkey p44_validator \
-  --subtensor.network finney \
-  --neuron.timeout 60 \
-  --logging.debug
-```
-
-### Script
-
-Script path: `scripts/validator/run/run_vali.sh`
-
-```bash
-chmod +x ./scripts/validator/run/run_vali.sh
-./scripts/validator/run/run_vali.sh
-```
-
-Before using the script, set at least:
-
-- `WALLET_NAME`
-- `HOTKEY`
-- `POKER44_HUMAN_JSON_PATH`
-
-The script is environment-driven. Example:
+Preferred command:
 
 ```bash
 WALLET_NAME=p44_cold \
 HOTKEY=p44_validator \
-POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
-POKER44_CHUNK_COUNT=40 \
-POKER44_REWARD_WINDOW=40 \
-POKER44_POLL_INTERVAL_SECONDS=300 \
-POKER44_MINERS_PER_CYCLE=16 \
-NEURON_TIMEOUT=60 \
+POKER44_RUNTIME_MODE=provider_runtime \
 ./scripts/validator/run/run_vali.sh
 ```
 
-PM2:
+Script path:
+
+- `scripts/validator/run/run_vali.sh`
+
+The script exports the provider-runtime defaults, bootstraps the local provider runtime if needed, and starts the validator under PM2.
+
+## PM2
 
 ```bash
 pm2 logs poker44_validator
@@ -132,35 +207,33 @@ pm2 stop poker44_validator
 pm2 delete poker44_validator
 ```
 
----
+Typical provider PM2 names managed by the bootstrap:
+
+- `p44_provider_backend`
+- `p44_provider_frontend`
+
+## Canonical Chunk Behavior
+
+The intended chunk lifecycle is:
+
+- hands are stored locally in the validator's PostgreSQL
+- raw hands stay in the provider/backend side
+- the validator does not need direct SQL access to raw hands
+- when the provider has between `70` and `120` usable hands, it can build a sanitized chunk candidate
+- chunks are built from hands in natural order, not reordered
+- only one canonical chunk is active per 2-hour window
+- all validators consume that same chunk from the shared coordinator
+- used chunks are tracked in coordinator-side tables such as `eval_used_chunks`
 
 ## Auto-Update
 
-Poker44 supports optional validator auto-update through a separate PM2 watcher process.
-
-How it works:
-
-- The watcher checks `origin/main` periodically.
-- It reads `VALIDATOR_DEPLOY_VERSION` from `poker44/__init__.py`.
-- It updates only when the remote deploy version is newer than the local one.
-- On update, it pulls the repo, reinstalls dependencies, and restarts the validator PM2 process.
+Poker44 supports optional validator auto-update through a separate PM2 watcher.
 
 Files:
 
 - `scripts/validator/update/auto_update_validator.sh`
 - `scripts/validator/update/update_validator.sh`
 - `scripts/validator/update/update_full.sh`
-
-Recommended environment for the watcher:
-
-- `PROCESS_NAME` (default `poker44_validator`)
-- `WALLET_NAME`
-- `WALLET_HOTKEY`
-- `SUBTENSOR_PARAM` (default `--subtensor.network finney`)
-- `VALIDATOR_ENV_DIR` (default `validator_env`)
-- `VALIDATOR_EXTRA_ARGS`
-- `SLEEP_INTERVAL` (default `600`)
-- `TARGET_BRANCH` (default `main`)
 
 Start the watcher:
 
@@ -172,113 +245,8 @@ pm2 start --name poker44_auto_update \
 pm2 save
 ```
 
-Typical one-time setup:
+## Related Docs
 
-```bash
-PROCESS_NAME=poker44_validator \
-WALLET_NAME=p44_cold \
-WALLET_HOTKEY=p44_validator \
-SUBTENSOR_PARAM="--subtensor.network finney" \
-VALIDATOR_ENV_DIR=validator_env \
-SLEEP_INTERVAL=600 \
-pm2 start --name poker44_auto_update \
-  --interpreter /bin/bash \
-  scripts/validator/update/auto_update_validator.sh
-```
-
-Manual update:
-
-```bash
-chmod +x scripts/validator/update/update_validator.sh
-./scripts/validator/update/update_validator.sh
-```
-
-Stop or inspect:
-
-```bash
-pm2 logs poker44_auto_update
-pm2 restart poker44_auto_update --update-env
-pm2 stop poker44_auto_update
-pm2 delete poker44_auto_update
-```
-
-Notes:
-
-- Auto-update is optional.
-- Validators still control whether they enable the watcher.
-- Deploys are gated by `VALIDATOR_DEPLOY_VERSION`, not by every commit on `main`.
-
----
-
-## Runtime Behavior
-
-Per cycle, validator:
-
-1. Builds mixed labeled chunks from private human data + generated bot data.
-2. Sanitizes payloads before sending to miners.
-3. Queries miners, records any returned `model_manifest`, and scores returned `risk_scores`.
-4. Updates internal scores and attempts `set_weights` on-chain.
-
-## Model Manifest Registry
-
-Poker44 validators now persist miner model metadata separately from scoring. This does not
-change the reward loop. It records what each miner claims to be running.
-
-Current behavior:
-
-- manifests are optional for backward compatibility;
-- when present, they are normalized and stored under the validator state directory as
-  `model_manifests.json`;
-- validator compliance state is persisted separately in `compliance_registry.json`;
-- validator anti-leakage tracking also persists `suspicion_registry.json` and
-  `served_chunk_registry.json`;
-- a manifest change is detected by digest and logged once per update;
-- miners are classified as `transparent` or `opaque` based on minimum manifest fields;
-- missing or incomplete disclosure fields create suspicion events per UID;
-- served chunk fingerprints are tracked to monitor repeated exposure of evaluation payloads;
-- `set_weights` still depends on prediction quality, not on manifest presence.
-
-For the broader threat model and planned controls around leaked private data, memorization,
-and hardcoded miners, see [Anti-Leakage Policy](./anti-leakage.md).
-
-Optional W&B integration:
-
-- Logs only aggregated validator telemetry.
-- Includes dataset hash, dataset statistics, forward-cycle summaries, reward summaries, and `set_weights` status.
-- Does not publish live chunks, private human data, or the validator's mixed evaluation dataset contents.
-- Public benchmark publication for miners is documented separately in [Public benchmark + W&B](./public-benchmark.md).
-
-Default production cadence:
-
-- dataset refresh: every `3600s`
-- query loop: every `300s` unless overridden
-- miner fanout: `16` miners per cycle by default, rotating across the eligible set
-
-Validated starting profile:
-
-- `POKER44_CHUNK_COUNT=40`
-- `POKER44_REWARD_WINDOW=40`
-- `--neuron.timeout 60`
-- `POKER44_MINERS_PER_CYCLE=16`
-
-These defaults were validated as a practical starting point for production-like runs:
-
-- `80` chunks with the current heuristic miners caused validator query timeouts;
-- `40` chunks with `60s` timeout completed successfully;
-- setting `POKER44_REWARD_WINDOW=40` allows miners to receive non-zero weights from the first completed cycle.
-- querying the full eligible set in one cycle degraded useful miner responses; rotating a subset per cycle was more stable.
-
----
-
-## Production Checklist
-
-- Validator logs show forward cycles and eligible miner UIDs.
-- Miners return non-empty `risk_scores` with expected chunk count.
-- Validator logs periodic successful weight submissions:
-  - `set_weights on chain successfully!`
-
----
-
-## Help
-
-- Open a GitHub issue for bugs or missing behavior.
+- [VALIDATOR_PROVIDER_SETUP.md](/Users/mac/poker44-launch/documentacion/operaciones/VALIDATOR_PROVIDER_SETUP.md)
+- [ENV_MATRIX.md](/Users/mac/poker44-launch/documentacion/operaciones/ENV_MATRIX.md)
+- [RUNBOOK.md](/Users/mac/poker44-launch/documentacion/operaciones/RUNBOOK.md)

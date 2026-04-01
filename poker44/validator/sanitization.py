@@ -222,6 +222,14 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def prepare_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Preserve already-sanitized eval payloads, otherwise sanitize canonical hands."""
+    schema = str(hand_payload.get("schema") or "").strip().lower()
+    if schema.startswith("poker44_eval_hand_v"):
+        return strip_leakage_fields(hand_payload)
+    return sanitize_hand_for_miner(hand_payload)
+
+
 def sanitized_chunk_signature(
     hands: List[Dict[str, Any]],
 ) -> Tuple[float, float, float, float, float, float, float, float, float]:

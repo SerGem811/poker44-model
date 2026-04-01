@@ -33,6 +33,10 @@ from poker44.utils.config import config
 from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
 from poker44.validator.integrity import load_json_registry
+from poker44.validator.runtime_provider import (
+    ProviderRuntimeConfig,
+    ProviderRuntimeDatasetProvider,
+)
 from hands_generator.mixed_dataset_provider import (
     DEFAULT_OUTPUT_PATH,
     MixedDatasetConfig,
@@ -55,45 +59,58 @@ class Validator(BaseValidatorNeuron):
 
         self.forward_count = 0
         self.settings = cfg
-
-        human_json_env = os.getenv("POKER44_HUMAN_JSON_PATH")
-        if not human_json_env:
-            raise RuntimeError(
-                "POKER44_HUMAN_JSON_PATH must point to the private local human-hand JSON used by validators."
-            )
-
-        human_json_path = Path(human_json_env).expanduser().resolve()
-        mixed_output_path = Path(
-            os.getenv("POKER44_MIXED_DATASET_PATH", str(DEFAULT_OUTPUT_PATH))
-        ).expanduser().resolve()
-        refresh_seconds = int(
-            os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60))
-        )
+        self.runtime_mode = str(os.getenv("POKER44_RUNTIME_MODE", "mixed_dataset")).strip().lower()
+        refresh_seconds = int(os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60)))
         chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "40"))
-        min_hands_per_chunk = int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))
-        max_hands_per_chunk = int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))
-        human_ratio = float(os.getenv("POKER44_HUMAN_RATIO", "0.5"))
-        dataset_seed_env = os.getenv("POKER44_DATASET_SEED")
-        dataset_seed = int(dataset_seed_env) if dataset_seed_env is not None else None
         self.chunk_batch_size = chunk_count
-        self.dataset_cfg = MixedDatasetConfig(
-            human_json_path=human_json_path,
-            output_path=mixed_output_path,
-            chunk_count=chunk_count,
-            min_hands_per_chunk=min_hands_per_chunk,
-            max_hands_per_chunk=max_hands_per_chunk,
-            human_ratio=human_ratio,
-            refresh_seconds=refresh_seconds,
-            seed=dataset_seed,
-        )
-        self.provider = TimedMixedDatasetProvider(self.dataset_cfg)
-        bt.logging.info(
-            f"📁 Using mixed dataset provider | human_json={human_json_path} output={mixed_output_path} "
-            f"chunks={chunk_count} hands_range=[{min_hands_per_chunk},{max_hands_per_chunk}] "
-            f"ratio={human_ratio} refresh_s={refresh_seconds}"
-        )
-        bt.logging.info("🧭 Dataset generation is deterministic per refresh window.")
-        configured_poll_interval = getattr(cfg, "poll_interval_seconds", refresh_seconds)
+
+        if self.runtime_mode == "provider_runtime":
+            provider_runtime_cfg = ProviderRuntimeConfig.from_env(
+                default_validator_id=self.wallet.hotkey.ss58_address
+            )
+            self.dataset_cfg = provider_runtime_cfg.public_summary()
+            self.provider = ProviderRuntimeDatasetProvider(provider_runtime_cfg)
+            bt.logging.info(
+                "🎯 Using provider runtime dataset provider | "
+                f"api={provider_runtime_cfg.api_base_url} "
+                f"validator_id={provider_runtime_cfg.validator_id} "
+                f"bootstrap={bool(provider_runtime_cfg.bootstrap_cmd)}"
+            )
+            configured_poll_interval = getattr(cfg, "poll_interval_seconds", 30)
+        else:
+            human_json_env = os.getenv("POKER44_HUMAN_JSON_PATH")
+            if not human_json_env:
+                raise RuntimeError(
+                    "POKER44_HUMAN_JSON_PATH must point to the private local human-hand JSON used by validators."
+                )
+
+            human_json_path = Path(human_json_env).expanduser().resolve()
+            mixed_output_path = Path(
+                os.getenv("POKER44_MIXED_DATASET_PATH", str(DEFAULT_OUTPUT_PATH))
+            ).expanduser().resolve()
+            min_hands_per_chunk = int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))
+            max_hands_per_chunk = int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))
+            human_ratio = float(os.getenv("POKER44_HUMAN_RATIO", "0.5"))
+            dataset_seed_env = os.getenv("POKER44_DATASET_SEED")
+            dataset_seed = int(dataset_seed_env) if dataset_seed_env is not None else None
+            self.dataset_cfg = MixedDatasetConfig(
+                human_json_path=human_json_path,
+                output_path=mixed_output_path,
+                chunk_count=chunk_count,
+                min_hands_per_chunk=min_hands_per_chunk,
+                max_hands_per_chunk=max_hands_per_chunk,
+                human_ratio=human_ratio,
+                refresh_seconds=refresh_seconds,
+                seed=dataset_seed,
+            )
+            self.provider = TimedMixedDatasetProvider(self.dataset_cfg)
+            bt.logging.info(
+                f"📁 Using mixed dataset provider | human_json={human_json_path} output={mixed_output_path} "
+                f"chunks={chunk_count} hands_range=[{min_hands_per_chunk},{max_hands_per_chunk}] "
+                f"ratio={human_ratio} refresh_s={refresh_seconds}"
+            )
+            bt.logging.info("🧭 Dataset generation is deterministic per refresh window.")
+            configured_poll_interval = getattr(cfg, "poll_interval_seconds", refresh_seconds)
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )
