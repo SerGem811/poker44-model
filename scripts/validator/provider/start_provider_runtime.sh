@@ -39,6 +39,11 @@ PROVIDER_CENTRAL_AUTH_ORIGIN="${POKER44_PROVIDER_CENTRAL_AUTH_ORIGIN:-https://de
 PROVIDER_EXTRA_CORS_ORIGINS="${POKER44_PROVIDER_EXTRA_CORS_ORIGINS:-}"
 PROVIDER_UFW_MANAGE="${POKER44_PROVIDER_UFW_MANAGE:-true}"
 PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL="${POKER44_PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL:-false}"
+PROVIDER_PUBLIC_EDGE_ENABLE="${POKER44_PROVIDER_PUBLIC_EDGE_ENABLE:-true}"
+PROVIDER_PUBLIC_EDGE_EMAIL="${POKER44_PROVIDER_PUBLIC_EDGE_EMAIL:-}"
+PROVIDER_PUBLIC_EDGE_NGINX_DIR="${POKER44_PROVIDER_PUBLIC_EDGE_NGINX_DIR:-/etc/nginx/sites-available}"
+PROVIDER_PUBLIC_EDGE_NGINX_ENABLED_DIR="${POKER44_PROVIDER_PUBLIC_EDGE_NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
+PROVIDER_PUBLIC_EDGE_CERTBOT="${POKER44_PROVIDER_PUBLIC_EDGE_CERTBOT:-true}"
 MIN_EVAL_HANDS="${POKER44_PROVIDER_MIN_EVAL_HANDS:-70}"
 MAX_EVAL_HANDS="${POKER44_PROVIDER_MAX_EVAL_HANDS:-120}"
 
@@ -147,7 +152,10 @@ ensure_public_access_rules() {
     return
   fi
   if [ "$(id -u)" -ne 0 ]; then
-    log "Skipping UFW rule management because bootstrap is not running as root"
+    if is_true "$PROVIDER_PUBLIC_EDGE_ENABLE"; then
+      echo "Provider public edge automation requires root privileges to manage UFW. Re-run as root or set POKER44_PROVIDER_PUBLIC_EDGE_ENABLE=false and manage the edge manually." >&2
+      exit 1
+    fi
     return
   fi
 
@@ -156,6 +164,249 @@ ensure_public_access_rules() {
   ufw allow "${FRONTEND_PORT}/tcp" >/dev/null 2>&1 || true
   ufw allow 80/tcp >/dev/null 2>&1 || true
   ufw allow 443/tcp >/dev/null 2>&1 || true
+}
+
+ensure_public_edge_prerequisites() {
+  if ! is_true "$PROVIDER_PUBLIC_EDGE_ENABLE"; then
+    return
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Provider public edge automation requires root privileges. Re-run as root or set POKER44_PROVIDER_PUBLIC_EDGE_ENABLE=false and manage nginx/certbot manually." >&2
+    exit 1
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    log "Skipping package bootstrap because apt-get is unavailable"
+    return
+  fi
+
+  local missing=0
+  command -v nginx >/dev/null 2>&1 || missing=1
+  if is_true "$PROVIDER_PUBLIC_EDGE_CERTBOT"; then
+    command -v certbot >/dev/null 2>&1 || missing=1
+  fi
+  if [ "$missing" -eq 0 ]; then
+    return
+  fi
+
+  log "Installing public edge prerequisites (nginx/certbot)"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  if is_true "$PROVIDER_PUBLIC_EDGE_CERTBOT"; then
+    apt-get install -y nginx certbot python3-certbot-nginx
+  else
+    apt-get install -y nginx
+  fi
+}
+
+resolve_public_host_ipv4() {
+  local host="$1"
+  python3 - "$host" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+try:
+    infos = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
+except Exception:
+    print("")
+    raise SystemExit(0)
+ips = []
+for info in infos:
+    ip = info[4][0]
+    if ip not in ips:
+        ips.append(ip)
+print(",".join(ips))
+PY
+}
+
+validate_public_host_resolution() {
+  local host="$1"
+  local expected="$2"
+  local resolved
+  resolved="$(resolve_public_host_ipv4 "$host")"
+  if [ -z "$resolved" ]; then
+    echo "Public provider host $host does not resolve yet. Configure DNS before running the bootstrap." >&2
+    exit 1
+  fi
+  if [ -n "$expected" ] && ! printf '%s' "$resolved" | tr ',' '\n' | grep -Fxq "$expected"; then
+    echo "Public provider host $host resolves to [$resolved], not to this server public IP $expected." >&2
+    exit 1
+  fi
+}
+
+write_nginx_site() {
+  local host="$1"
+  local api_host="$2"
+  local site_name="$3"
+  local config_path="$PROVIDER_PUBLIC_EDGE_NGINX_DIR/$site_name"
+  local enabled_path="$PROVIDER_PUBLIC_EDGE_NGINX_ENABLED_DIR/$site_name"
+
+  mkdir -p "$PROVIDER_PUBLIC_EDGE_NGINX_DIR" "$PROVIDER_PUBLIC_EDGE_NGINX_ENABLED_DIR"
+
+  if [ "$host" = "$api_host" ]; then
+    cat >"$config_path" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $host;
+
+    client_max_body_size 20m;
+
+    location /api/v1/ {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT/api/v1/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /rooms {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT/rooms;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT/socket.io/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:$FRONTEND_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+  else
+    cat >"$config_path" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $host;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://127.0.0.1:$FRONTEND_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $api_host;
+
+    client_max_body_size 20m;
+
+    location /api/v1/ {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT/api/v1/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /rooms {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT/rooms;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:$BACKEND_PORT/socket.io/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+  fi
+
+  ln -sfn "$config_path" "$enabled_path"
+  nginx -t
+  systemctl reload nginx
+}
+
+ensure_public_edge_tls() {
+  local host="$1"
+  local api_host="$2"
+  if ! is_true "$PROVIDER_PUBLIC_EDGE_CERTBOT"; then
+    return
+  fi
+  if [ -z "$PROVIDER_PUBLIC_EDGE_EMAIL" ]; then
+    echo "POKER44_PROVIDER_PUBLIC_EDGE_EMAIL is required to issue TLS certificates automatically." >&2
+    exit 1
+  fi
+  if [ "$host" = "$api_host" ]; then
+    certbot --nginx --non-interactive --agree-tos -m "$PROVIDER_PUBLIC_EDGE_EMAIL" -d "$host" --redirect
+  else
+    certbot --nginx --non-interactive --agree-tos -m "$PROVIDER_PUBLIC_EDGE_EMAIL" -d "$host" -d "$api_host" --redirect
+  fi
+}
+
+ensure_public_edge() {
+  if ! is_true "$PROVIDER_PUBLIC_EDGE_ENABLE"; then
+    return
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Provider public edge automation requires root privileges. Re-run as root or set POKER44_PROVIDER_PUBLIC_EDGE_ENABLE=false and manage the public edge manually." >&2
+    exit 1
+  fi
+
+  local host="$1"
+  local api_host="$2"
+  local site_name="$3"
+  local expected_ip="$4"
+
+  validate_public_host_resolution "$host" "$expected_ip"
+  if [ "$api_host" != "$host" ]; then
+    validate_public_host_resolution "$api_host" "$expected_ip"
+  fi
+  ensure_public_edge_prerequisites
+  write_nginx_site "$host" "$api_host" "$site_name"
+  ensure_public_edge_tls "$host" "$api_host"
+}
+
+verify_public_edge_health() {
+  if ! is_true "$PROVIDER_PUBLIC_EDGE_ENABLE"; then
+    return
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    return
+  fi
+
+  local frontend_url="$1"
+  local api_base_url="$2"
+  log "Verifying public edge health"
+  curl -fsS -I --max-time 15 "$frontend_url" >/dev/null
+  curl -fsS --max-time 15 "$api_base_url/health/live" >/dev/null
 }
 
 hash_value() {
@@ -336,6 +587,11 @@ if [ -z "$PROVIDER_JWT_SECRET" ]; then
 fi
 
 ensure_public_access_rules
+if [ -n "$PUBLIC_BASE_HOST" ]; then
+  PUBLIC_EDGE_SITE_NAME="p44-provider-${PROVIDER_VALIDATOR_ID}"
+  PUBLIC_EDGE_SITE_NAME="$(printf '%s' "$PUBLIC_EDGE_SITE_NAME" | tr -c 'A-Za-z0-9._-' '-')"
+  ensure_public_edge "$PUBLIC_BASE_HOST" "${PUBLIC_API_HOST:-$PUBLIC_BASE_HOST}" "$PUBLIC_EDGE_SITE_NAME" "$PUBLIC_HOST"
+fi
 
 ensure_repo "$BACKEND_DIR" "$BACKEND_REPO_URL" "$RUNTIME_BRANCH"
 if ! is_true "$SKIP_FRONTEND"; then
@@ -409,6 +665,10 @@ if ! is_true "$SKIP_FRONTEND"; then
       rsync -a ".next/static/" "$NEXT_STATIC_TARGET/"
     fi
   fi
+fi
+
+if [ -n "$PUBLIC_BASE_HOST" ]; then
+  verify_public_edge_health "$FRONTEND_PUBLIC_BASE_URL" "$PUBLIC_API_BASE_URL"
 fi
 
 pm2 save

@@ -39,6 +39,10 @@ Concretely, `pull + restart` means:
 - it refuses legacy public setups that expose the provider through raw IP / plain HTTP unless explicitly overridden
 - it aligns provider cookies and CORS for `*.poker44.net` hosts automatically
 - it opens `80/tcp` and `443/tcp` in `ufw` automatically when available
+- it can bootstrap the public edge itself once DNS already points to the validator:
+  - `nginx` site
+  - `certbot` TLS
+  - reload + health path
 - it ensures a provider table exists
 - that table becomes visible through the public directory
 - hands generated on that table are persisted in the validator's own PostgreSQL
@@ -63,6 +67,7 @@ Important:
 - PM2
 - Docker and Docker Compose for bundled provider Postgres/Redis, unless the operator uses their own services
 - registered validator hotkey on netuid `126`
+- root privileges if you want the bootstrap to automate `ufw`, `nginx`, and `certbot`
 
 ## Install
 
@@ -117,6 +122,7 @@ Important defaults:
 - `POKER44_PROVIDER_RUN_MIGRATIONS=true`
 - `POKER44_PROVIDER_CENTRAL_AUTH_ORIGIN=https://dev.poker44.net`
 - `POKER44_PROVIDER_UFW_MANAGE=true`
+- `POKER44_PROVIDER_PUBLIC_EDGE_ENABLE=true`
 
 The validator itself does not talk directly to the global coordinator.
 
@@ -157,6 +163,7 @@ The validator bootstrap can manage these values automatically if they are not pr
 - `POKER44_PROVIDER_REDIS_URL`
 - `POKER44_PROVIDER_JWT_SECRET`
 - `POKER44_PROVIDER_COOKIE_DOMAIN`
+- `POKER44_PROVIDER_PUBLIC_EDGE_EMAIL`
 - `POKER44_PROVIDER_FIXED_ROOM_CODE`
 
 Useful overrides:
@@ -175,6 +182,11 @@ Useful overrides:
 - `POKER44_PROVIDER_EXTRA_CORS_ORIGINS`
 - `POKER44_PROVIDER_UFW_MANAGE`
 - `POKER44_PROVIDER_ALLOW_INSECURE_PUBLIC_BASE_URL`
+- `POKER44_PROVIDER_PUBLIC_EDGE_ENABLE`
+- `POKER44_PROVIDER_PUBLIC_EDGE_EMAIL`
+- `POKER44_PROVIDER_PUBLIC_EDGE_CERTBOT`
+- `POKER44_PROVIDER_PUBLIC_EDGE_NGINX_DIR`
+- `POKER44_PROVIDER_PUBLIC_EDGE_NGINX_ENABLED_DIR`
 - `POKER44_PROVIDER_SKIP_FRONTEND`
 - `POKER44_PROVIDER_GIT_PULL`
 - `POKER44_PROVIDER_BACKEND_PM2_NAME`
@@ -213,9 +225,31 @@ POKER44_PROVIDER_PUBLIC_BASE_URL=https://provider-<validator>.dev.poker44.net
 POKER44_PROVIDER_SHARED_JWT_SECRET='<same JWT secret as central dev backend>'
 POKER44_PROVIDER_COOKIE_DOMAIN=.poker44.net
 POKER44_PROVIDER_CENTRAL_AUTH_ORIGIN=https://dev.poker44.net
+POKER44_PROVIDER_PUBLIC_EDGE_EMAIL=ops@poker44.net
 ```
 
 If the operator does not set a proper `https` hostname, the bootstrap now fails fast instead of silently deploying a provider that will later timeout on `Join`.
+
+## DNS Prerequisite
+
+The bootstrap can automate:
+
+- `ufw`
+- `nginx`
+- `certbot`
+- provider backend/frontend process boot
+
+but it still cannot invent public DNS by itself.
+
+Before restart, the operator must ensure that the chosen public host already resolves to the validator server IP. Once that is true, the bootstrap can finish the rest automatically.
+
+If the validator process does not run with sufficient privileges, set:
+
+```bash
+POKER44_PROVIDER_PUBLIC_EDGE_ENABLE=false
+```
+
+and manage `ufw` / `nginx` / `certbot` outside the bootstrap.
 
 Script path:
 
