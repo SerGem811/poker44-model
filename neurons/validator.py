@@ -73,8 +73,7 @@ class Validator(BaseValidatorNeuron):
             bt.logging.info(
                 "🎯 Using provider runtime dataset provider | "
                 f"api={provider_runtime_cfg.api_base_url} "
-                f"validator_id={provider_runtime_cfg.validator_id} "
-                f"bootstrap={bool(provider_runtime_cfg.bootstrap_cmd)}"
+                f"validator_id={provider_runtime_cfg.validator_id}"
             )
             configured_poll_interval = getattr(cfg, "poll_interval_seconds", 30)
         else:
