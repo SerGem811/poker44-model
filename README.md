@@ -21,101 +21,103 @@
 
 ## What is Poker44?
 
-Poker44 is a Bittensor subnet focused on one problem: detecting bots in online poker with objective, reproducible evaluation.
+Poker44 is a Bittensor subnet focused on one problem: detecting bots in online poker with
+objective, reproducible evaluation.
 
-Validators build labeled evaluation windows (human vs bot behavior), query miners, score predictions, and publish weights on-chain.  
-Miners compete by returning robust bot-risk predictions that generalize to evolving bot behavior.
+Validators query miners with sanitized poker-behavior payloads, score predictions, and publish
+weights on-chain. Miners compete by returning robust bot-risk predictions that generalize to
+evolving live-table behavior.
 
 Poker44 is security infrastructure, not a poker room.
 
 ---
 
-## Vision
+## Current Production Model
 
-### Short-Mid Term (Subnet Operating Model)
+The current production direction is:
 
-Poker44 currently uses a hybrid operating model to generate high-quality labeled datasets for miner evaluation.  
-The immediate direction is to consolidate this into a decentralized runtime path where gameplay/integrity services are executed on validator infrastructure, with attested execution and reproducible evaluation loops.
+- a live provider table runs on Poker44 platform infrastructure;
+- that table includes both human and bot seats;
+- hands are persisted to central platform SQL;
+- `poker44-platform-backend` builds sanitized evaluation batches from those hands;
+- validators do **not** run their own tables;
+- validators fetch the active canonical batch set through the central eval API;
+- validators send those batches to miners, compute rewards, and set weights.
 
-### Mid-Long Term (Global Decentralized Platform)
-
-Beyond the current hybrid stage, Poker44 targets a fully decentralized poker integrity platform:
-
-- integrity and model-evaluation loop coordinated through the subnet,
-- transparent, verifiable settlement through smart contracts,
-- global trust-minimized operation with auditable behavior validation.
-
-In short: today’s hybrid platform is the data/evaluation engine; the destination is a global decentralized platform with on-chain settlement guarantees.
+The old local `mixed_dataset` validator path still exists in code, but it is no longer the target
+production operating model.
 
 ---
 
-## Target Outcome
+## What Miners Receive Today
 
-The subnet is designed to support production anti-bot workflows where suspicious behavior is detected early and reviewed with evidence.
+Miners receive `DetectionSynapse(chunks=...)`.
 
-<div align="center">
-  <img src="poker44/assets/bot_detected.png" alt="Example bot detection overlay on a poker table" style="max-width:900px;width:100%;">
-</div>
+Current semantics:
 
----
+- `chunks` is a list of chunks;
+- each chunk is a list of sanitized hand payloads;
+- validators expect one `risk_score` per chunk;
+- today, in the live `provider_runtime` path, each chunk is usually one sanitized hand/example.
 
-## How the Subnet Works (V0)
+This means:
 
-### Validators
+- the overall validator request can contain both human-labeled and bot-labeled chunks;
+- but miners are not currently receiving a single mixed multi-hand chunk with one global label.
 
-- Build mixed labeled chunks from private human hands plus generated bot hands.
-- Query miners with standardized chunk payloads.
-- Score miner outputs and set weights on-chain.
+See:
 
-### Miners
-
-- Receive chunked poker behavior payloads.
-- Return `risk_scores` and predicted labels for each chunk.
-- Publish a lightweight `model_manifest` describing the implementation behind the miner.
-- Compete on accuracy, calibration, low false positives, and robustness over time.
+- [Miner Guide](docs/miner.md)
+- [Validator Guide](docs/validator.md)
 
 ---
 
-## Data Model
+## Data Model Boundary
 
-### Public training data for miners
+### Production evaluation
 
-The repo includes a compressed human corpus:
+Production validators now target:
 
-`hands_generator/human_hands/poker_hands_combined.json.gz`
+- live hands from Poker44 platform tables;
+- SQL-persisted events and hand results;
+- centralized sanitized batch generation through `/internal/eval/*`.
 
-Intended use:
+### Public benchmark
 
-- Use it as human base data.
-- Generate bot hands with `hands_generator/bot_hands/generate_poker_data.py`.
-- Train your own model and features.
-- Optionally build and publish a public benchmark artifact with:
-  `python scripts/publish/publish_public_benchmark.py --skip-wandb`
+The repo still includes a public benchmark/training path for miner development.
 
-### Validator evaluation data
+That public benchmark is:
 
-Validators should not rely on the public corpus for evaluation.  
-Set `POKER44_HUMAN_JSON_PATH` to a private local human dataset.
+- useful for local training and offline testing;
+- aligned with the sanitized schema;
+- **not** a mirror of the live production evaluation stream.
 
-The public benchmark builder uses only the repo public human corpus plus offline-generated
-bot chunks. It does not use validator-private human data and does not publish the live
-validator evaluation dataset.
+See:
 
-### Open-Source Miner Standard
+- [Public benchmark + W&B](docs/public-benchmark.md)
 
-Poker44 now supports a lightweight `model_manifest` attached to normal miner responses.
-This does not change validator scoring or on-chain `set_weights`. It adds traceability for
-miners that want to make their models open source while the subnet keeps the current
-remote-inference evaluation loop.
+---
 
-Recommended manifest fields:
+## Open-Source Miner Standard
 
-- public repo URL
-- repo commit or tag for the production version
+Poker44 supports a lightweight `model_manifest` attached to miner responses.
+
+This does not change validator scoring or on-chain `set_weights`. It adds:
+
+- traceability
+- training-data disclosure
+- transparency metadata
+- anti-leakage observability
+
+Recommended manifest fields include:
+
+- repo URL
+- repo commit or tag
 - model name and version
 - framework
 - license
-- optional artifact URL / artifact SHA256
+- training-data statement
+- private-data attestation
 
 ---
 
@@ -135,11 +137,10 @@ Then follow:
 - [Miner setup](docs/miner.md)
 - [Public benchmark + W&B](docs/public-benchmark.md)
 
-Validator operators can also enable optional auto-update support. See [Validator setup](docs/validator.md).
+Validated current production-like validator profile:
 
-Validated starting profile for production-like operation:
-
-- `POKER44_CHUNK_COUNT=40`
+- `POKER44_RUNTIME_MODE=provider_runtime`
+- `POKER44_CHUNK_COUNT=80`
 - `POKER44_REWARD_WINDOW=40`
 - `POKER44_POLL_INTERVAL_SECONDS=300`
 - `--neuron.timeout 60`

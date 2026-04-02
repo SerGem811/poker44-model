@@ -1,8 +1,111 @@
-# 🛠️ Poker44 Miner Guide
+# Poker44 Miner Guide
 
-This guide covers the production-facing miner flow for Poker44 subnet `126`.
+Production-facing miner guide for Poker44 subnet `126`.
 
----
+## What Miners Are Solving Today
+
+Poker44 validators currently evaluate miners with sanitized behavioral payloads derived from
+live Poker44 platform tables.
+
+Current production path:
+
+1. a live provider table runs on Poker44 platform infrastructure;
+2. those hands are persisted in platform SQL;
+3. `poker44-platform-backend` builds sanitized labeled evaluation batches from those hands;
+4. the validator fetches the active batch set through `/internal/eval/current`;
+5. the validator sends those batches to miners through `DetectionSynapse`;
+6. miners return one risk score per received chunk;
+7. the validator scores the miner and sets weights on-chain.
+
+Important: the miner does **not** receive labels.
+
+## Current Miner Contract
+
+Miners receive `DetectionSynapse(chunks=...)`.
+
+Current semantics:
+
+- `chunks` is a list of chunks;
+- each chunk is a list of sanitized hand payloads;
+- today, in the live `provider_runtime` path, each chunk is typically a single sanitized
+  hand/example;
+- the validator expects exactly one `risk_score` per chunk.
+
+So today the practical task is:
+
+- receive many chunks per request;
+- score each chunk independently;
+- return one probability-like bot score per chunk.
+
+Relevant code:
+
+- [DetectionSynapse](/Users/mac/poker44-launch/poker44-subnet/poker44/validator/synapse.py)
+- [reference miner](/Users/mac/poker44-launch/poker44-subnet/neurons/miner.py)
+- [validator forward cycle](/Users/mac/poker44-launch/poker44-subnet/poker44/validator/forward.py)
+
+## Important Precision About Chunk Structure
+
+There are two different layers:
+
+1. source hands on platform tables
+2. chunks delivered to miners
+
+Today, platform source hands are collected from live mixed tables where humans and bots sit
+together.
+
+But the chunk format delivered to miners is still aligned with the current scoring path:
+
+- the backend turns each eligible player perspective into its own labeled batch;
+- each batch currently contains one sanitized hand/example;
+- the validator groups those batches into `DetectionSynapse(chunks=...)`;
+- miners return one score per batch/chunk.
+
+So:
+
+- the overall validator request can contain both human-labeled and bot-labeled chunks;
+- but miners are **not** currently receiving a single multi-hand chunk that mixes hidden
+  human and bot labels inside the same chunk.
+
+Do not build your miner assuming this exact granularity will never evolve, but document and
+optimize against the contract that is live today: one score per received chunk.
+
+## Sanitized Payload Boundary
+
+The payload sent to miners is sanitized before inference.
+
+Current provider-runtime sanitization includes:
+
+- opaque `hand_id`
+- opaque `table_id`
+- opaque seat tokens
+- sanitized event sequence
+- no direct identity fields
+- no explicit ground-truth label
+
+Recent hardening removed the most obvious timing leakage from the miner-visible payload.
+
+See:
+
+- [Anti-Leakage Policy](./anti-leakage.md)
+
+## Expected Miner Output
+
+Return fields:
+
+- `risk_scores: List[float]`
+- `predictions: List[bool]` optional but recommended
+- `model_manifest: Dict[str, Any]` optional but recommended
+
+Rules:
+
+- length of `risk_scores` must equal number of received chunks;
+- each score should be in `[0, 1]`;
+- `predictions` should align one-to-one with `risk_scores` when provided.
+
+The reference miner treats each chunk as one scoring unit and returns:
+
+- low score for human-like behavior
+- high score for bot-like behavior
 
 ## Install
 
@@ -16,13 +119,11 @@ pip install -e .
 pip install bittensor-cli
 ```
 
-Or use the helper script:
+Or use:
 
 ```bash
 ./scripts/miner/setup.sh
 ```
-
----
 
 ## Wallet and Registration
 
@@ -41,27 +142,13 @@ btcli subnet register \
 btcli wallet overview --wallet.name my_cold --subtensor.network finney
 ```
 
----
-
 ## Run Miner
 
-Script path: `scripts/miner/run/run_miner.sh`
+Script path:
 
-```bash
-chmod +x ./scripts/miner/run/run_miner.sh
-./scripts/miner/run/run_miner.sh
-```
+- `scripts/miner/run/run_miner.sh`
 
-Before using the script, set at least:
-
-- `WALLET_NAME`
-- `HOTKEY`
-- `AXON_PORT`
-- `ALLOWED_VALIDATOR_HOTKEYS` for the recommended Swarm-like allowlist mode
-
-If `ALLOWED_VALIDATOR_HOTKEYS` is left empty, the script falls back to `--blacklist.force_validator_permit`.
-
-The script is environment-driven. Example:
+Example:
 
 ```bash
 WALLET_NAME=my_cold \
@@ -71,16 +158,17 @@ ALLOWED_VALIDATOR_HOTKEYS="validator_hotkey_1 validator_hotkey_2" \
 ./scripts/miner/run/run_miner.sh
 ```
 
-PM2:
+Before using the script, set at least:
 
-```bash
-pm2 logs poker44_miner
-pm2 restart poker44_miner
-pm2 stop poker44_miner
-pm2 delete poker44_miner
-```
+- `WALLET_NAME`
+- `HOTKEY`
+- `AXON_PORT`
+- `ALLOWED_VALIDATOR_HOTKEYS` for the recommended allowlist mode
 
-Direct CLI example with explicit validator allowlist:
+If `ALLOWED_VALIDATOR_HOTKEYS` is empty, the script falls back to
+`--blacklist.force_validator_permit`.
+
+Direct CLI example:
 
 ```bash
 python neurons/miner.py \
@@ -92,31 +180,27 @@ python neurons/miner.py \
   --blacklist.allowed_validator_hotkeys <validator_hotkey_1> <validator_hotkey_2>
 ```
 
----
+## Production Access Policy
 
-## Request/Response Contract
+Recommended mode:
 
-Miners receive `DetectionSynapse(chunks=...)`, where:
+- `--blacklist.allowed_validator_hotkeys <validator_hotkey...>`
 
-- `chunks` is a list of chunks.
-- each chunk is a list of hands.
-- return exactly one `risk_score` per chunk.
+Fallback mode:
 
-Expected output fields:
+- `--blacklist.force_validator_permit`
 
-- `risk_scores: List[float]` in `[0, 1]`
-- `predictions: List[bool]` (optional but recommended)
-- `model_manifest: Dict[str, Any]` (recommended; published automatically by the reference miner)
+Operationally:
 
-Important: validator payloads are sanitized to remove label/identity leakage before querying miners.
+- if an allowlist is set, only those validators may query your miner;
+- otherwise the miner falls back to the metagraph `validator_permit` rule.
 
-### Model Manifest
+## Model Manifest
 
-Poker44 miners can publish a lightweight `model_manifest` without changing the current
-remote-inference evaluation flow. The validator still scores returned `risk_scores`; the
-manifest is for transparency and traceability.
+Poker44 miners can publish a lightweight `model_manifest` without changing the remote-inference
+scoring path.
 
-Recommended manifest fields:
+Recommended fields:
 
 - `open_source`
 - `repo_url`
@@ -128,7 +212,8 @@ Recommended manifest fields:
 - `training_data_statement`
 - `training_data_sources`
 - `private_data_attestation`
-- `artifact_url` and `artifact_sha256` when a downloadable checkpoint exists
+- `artifact_url`
+- `artifact_sha256`
 - `implementation_sha256`
 
 Minimum fields for `transparent` compliance:
@@ -141,106 +226,44 @@ Minimum fields for `transparent` compliance:
 - `training_data_statement`
 - `private_data_attestation`
 
-If these fields are missing, the validator can still score the miner today, but the miner is
-classified as `opaque` rather than `transparent`.
+The validator still scores your `risk_scores`; the manifest is for transparency and
+anti-leakage tracking.
 
-The reference miner reads these environment variables when available:
+## Public Benchmark vs Production Evaluation
 
-- `POKER44_MODEL_OPEN_SOURCE`
-- `POKER44_MODEL_REPO_URL`
-- `POKER44_MODEL_REPO_COMMIT`
-- `POKER44_MODEL_NAME`
-- `POKER44_MODEL_VERSION`
-- `POKER44_MODEL_FRAMEWORK`
-- `POKER44_MODEL_LICENSE`
-- `POKER44_MODEL_ARTIFACT_URL`
-- `POKER44_MODEL_ARTIFACT_SHA256`
-- `POKER44_MODEL_CARD_URL`
-- `POKER44_MODEL_TRAINING_DATA_STATEMENT`
-- `POKER44_MODEL_TRAINING_DATA_SOURCES`
-- `POKER44_MODEL_PRIVATE_DATA_ATTESTATION`
-- `POKER44_MODEL_INFERENCE_MODE`
-- `POKER44_MODEL_NOTES`
+The public benchmark is still useful for:
 
-For the rationale behind these disclosures, see [Anti-Leakage Policy](./anti-leakage.md).
+- local training
+- schema familiarization
+- offline testing
 
-Startup behavior of the reference miner:
+But it is **not** the same as production evaluation.
 
-- logs the published `model_manifest`
-- logs current `transparent` / `opaque` status and missing fields
-- logs benchmark/doc paths useful for miner preparation
-- logs the public benchmark command miners can use locally
+Production validators now target:
 
----
+- live hands generated on Poker44 platform tables
+- centralized SQL persistence
+- sanitizer-built batches served by the eval API
 
-## Production Access Policy
+The public benchmark remains a reference artifact, not a mirror of the live evaluation stream.
 
-Poker44 miners support two production access modes.
-
-Recommended mode, similar to Swarm:
-
-- `--blacklist.allowed_validator_hotkeys <validator_hotkey...>`
-
-Meaning:
-
-- only the listed validator hotkeys may query your miner;
-- requests must be signed and pass Bittensor's default request verification;
-- this does not depend on `validator_permit=True` being visible on the metagraph.
-
-Fallback mode:
-
-- `--blacklist.force_validator_permit`
-
-Meaning:
-
-- requests from non-permitted peers are rejected;
-- access depends on the caller having `validator_permit=True` on the metagraph.
-
-Operational note:
-
-- if `--blacklist.allowed_validator_hotkeys` is set, the miner uses the allowlist policy;
-- if no allowlist is set, the miner falls back to the `validator_permit` policy;
-- in both cases, your miner must stay reachable and correctly served on-chain.
-
----
-
-## Training Data (Miner Side)
-
-Public human corpus:
-
-`hands_generator/human_hands/poker_hands_combined.json.gz`
-
-Bot generation:
-
-```bash
-python3 hands_generator/bot_hands/generate_poker_data.py
-```
-
-Output:
-
-`hands_generator/bot_hands/bot_hands.json`
-
-Validators evaluate with private human data (`POKER44_HUMAN_JSON_PATH`), not with the public training corpus.
-
-Optional public benchmark artifact generation:
-
-```bash
-python scripts/publish/publish_public_benchmark.py --skip-wandb
-```
-
-This produces a labeled benchmark built only from the public human corpus and offline-generated
-bot chunks, with the same sanitized hand schema miners see at inference time. It does not use
-the validator's private human dataset and does not expose the live validator batches.
-
-See also:
+See:
 
 - [Public benchmark + W&B](./public-benchmark.md)
 
----
+## PM2
+
+```bash
+pm2 logs poker44_miner
+pm2 restart poker44_miner
+pm2 stop poker44_miner
+pm2 delete poker44_miner
+```
 
 ## Health Checklist
 
-- Miner hotkey registered on netuid `126`.
-- Axon served and visible on-chain.
-- Validator queries are accepted.
-- Miner returns non-empty `risk_scores` with correct chunk count.
+- Miner hotkey registered on netuid `126`
+- Axon served and reachable
+- Validator queries accepted
+- Returned `risk_scores` length matches chunk count
+- Miner remains stable under repeated validator polling

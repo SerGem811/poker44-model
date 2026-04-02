@@ -21,8 +21,8 @@ Open source is not treated as full proof of honesty. It is the first layer of:
 
 Poker44 currently evaluates miners through remote inference:
 
-1. validator builds mixed private chunks
-2. validator sanitizes payloads
+1. Poker44 platform builds sanitized evaluation batches from live table hands
+2. validator fetches the active canonical batch set
 3. validator sends chunks to miners
 4. miners return `risk_scores`
 5. validator computes rewards
@@ -240,8 +240,8 @@ Correct claim:
 
 Real defense against leakage requires:
 
-- private validator datasets
-- rotating evaluation windows
+- private/live evaluation boundaries
+- rotating live evaluation windows
 - limited repeated exposure
 - future canary chunks / hidden holdouts
 - possibly artifact-based verification later

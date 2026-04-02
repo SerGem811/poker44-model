@@ -2,62 +2,117 @@
 
 Validator guide for Poker44 subnet `126`.
 
-## Current Model
+## Current Architecture
 
-The validator now has one intended operating model:
+Poker44 validators are now intended to run in a **consumer-only** model.
 
-- a single real poker table runs on Poker44 platform infrastructure
-- that table persists hands in the central platform SQL
-- `poker44-platform-backend` builds sanitized evaluation chunks from those hands
-- validators do **not** run their own tables
-- validators do **not** bootstrap provider frontend/backend locally
-- validators consume chunks from the central eval API
-- validators send those chunks to miners, compute rewards, and set weights on-chain
+That means:
 
-The old `mixed_dataset` mode still exists in code for compatibility, but it is no longer the target operating path.
+- validators do **not** run their own poker tables;
+- validators do **not** bootstrap provider frontend/backend locally;
+- validators do **not** build live evaluation data from local JSON on the production path;
+- validators consume canonical evaluation batches from the central Poker44 eval API;
+- validators query miners, compute rewards, and set weights on-chain.
+
+The old `mixed_dataset` mode still exists in code for compatibility and local experimentation,
+but it is no longer the target production operating path.
+
+## Separation of Responsibilities
+
+### Poker44 platform infrastructure owns
+
+- the live provider table;
+- bots seated at that table;
+- real-time gameplay;
+- SQL persistence of hands and events;
+- sanitization of evaluation payloads;
+- chunk publication through `/internal/eval/*`.
+
+### `poker44-subnet` validator owns
+
+- polling the eval API;
+- fetching the active canonical batch set;
+- querying miners;
+- scoring miner responses;
+- updating weights on-chain;
+- marking evaluated hand IDs back to the API.
+
+This is the key design boundary: live table/runtime logic lives in `poker44-platform-*`, not in
+the validator.
+
+## What the Validator Actually Sends to Miners
+
+Current validator behavior is important to understand precisely.
+
+The validator fetches `batches` from the central eval API. Each returned batch currently looks like:
+
+- one hidden label (`is_human`) on the validator side only;
+- one list of `hands`;
+- today, each batch typically contains a single sanitized hand/example.
+
+Then the validator converts those batches into:
+
+- `DetectionSynapse(chunks=...)`
+
+Where:
+
+- `chunks` is a list of chunks;
+- each chunk is a list of sanitized hands;
+- today, each chunk is usually a one-hand chunk;
+- miners return one score per chunk.
+
+So the current production path is **not** “one label for the entire epoch payload”.
+Instead:
+
+- the active eval payload contains many labeled batches;
+- the validator scores miners batch-by-batch;
+- each batch currently corresponds to one sanitized hand/example.
+
+Relevant code:
+
+- [validator entrypoint](/Users/mac/poker44-launch/poker44-subnet/neurons/validator.py)
+- [runtime provider](/Users/mac/poker44-launch/poker44-subnet/poker44/validator/runtime_provider.py)
+- [forward cycle](/Users/mac/poker44-launch/poker44-subnet/poker44/validator/forward.py)
+- [synapse](/Users/mac/poker44-launch/poker44-subnet/poker44/validator/synapse.py)
+
+## Where the Eval Data Comes From
+
+The current production source is:
+
+1. a single live provider table runs on Poker44 platform infrastructure;
+2. that table contains both human and bot seats;
+3. all hands are persisted to platform SQL;
+4. `poker44-platform-backend` scans unconsumed hands and builds sanitized evaluation batches;
+5. if `requireMixed=true`, only source hands that include both human and bot participation are eligible;
+6. the backend publishes an active canonical chunk for the epoch/window;
+7. validators read that active chunk through `/internal/eval/current`.
+
+Important nuance:
+
+- source hands come from mixed live tables;
+- the published payload can contain both human-labeled and bot-labeled batches;
+- but each delivered batch/chunk is still currently a one-example unit from the validator’s point of view.
 
 ## Pull + Restart Contract
 
 When a validator operator does only:
 
 1. `git pull`
-2. restart the validator process
+2. restart the validator
 
-the validator should be able to resume evaluation against the central Poker44 eval API.
+the validator should resume normal evaluation against the central eval API.
 
-Concretely, `pull + restart` means:
+Concretely:
 
-- the validator starts in `provider_runtime`
-- it does **not** create a local table
-- it does **not** clone `poker44-platform-*`
-- it does **not** configure `nginx`, `certbot`, `ufw`, frontend, or provider backend
-- it calls the central eval API on Poker44 platform
-- it checks whether enough real hands exist to build a chunk
-- it can ask the central backend to publish the current chunk if needed
-- it fetches the active canonical chunk
-- it sends that same chunk to miners
-- it computes rewards and sets weights
-- it marks the consumed hand tokens as evaluated back in the central backend
-
-## Separation of Responsibilities
-
-`poker44-platform-*` owns:
-
-- the live poker table
-- the game runtime
-- SQL persistence of hands/events
-- chunk generation
-- canonical chunk publication
-- `eval_chunks`, `eval_chunk_epochs`, `eval_used_chunks`
-
-`poker44-subnet` owns:
-
-- validator polling
-- miner queries
-- reward calculation
-- weight updates
-
-This keeps the validator focused on evaluation, not infrastructure.
+- it starts in `provider_runtime`;
+- it connects to the central Poker44 eval API;
+- it checks whether enough real hands exist;
+- it may request publication of the current canonical chunk;
+- it fetches the active chunk;
+- it sends that chunk set to miners;
+- it computes rewards;
+- it sets weights;
+- it marks evaluated hand IDs back to the API.
 
 ## Requirements
 
@@ -65,9 +120,9 @@ This keeps the validator focused on evaluation, not infrastructure.
 - Python 3.10+
 - PM2
 - registered validator hotkey on netuid `126`
-- network access from the validator to the central Poker44 eval API
+- network access to the central Poker44 eval API
 
-No local provider stack is required for the validator in this model.
+No local provider stack is required in the target production model.
 
 ## Install
 
@@ -99,62 +154,54 @@ btcli subnet register \
 btcli wallet overview --wallet.name p44_cold --subtensor.network finney
 ```
 
+## Runtime Modes
+
+### Production target
+
+- `POKER44_RUNTIME_MODE=provider_runtime`
+
+### Legacy compatibility mode
+
+- `POKER44_RUNTIME_MODE=mixed_dataset`
+
+`mixed_dataset` still exists for compatibility, but production validators should be treated as
+`provider_runtime` consumers of central eval data.
+
 ## Required Environment
 
-Mandatory:
+Mandatory for production:
 
 - `POKER44_RUNTIME_MODE=provider_runtime`
 - `WALLET_NAME`
 - `HOTKEY`
+- `POKER44_EVAL_API_BASE_URL`
 - `POKER44_PROVIDER_INTERNAL_SECRET`
 
-Important defaults:
+Important defaults in the current script:
 
-- `POKER44_EVAL_API_BASE_URL=http://185.196.20.208:4001`
 - `POKER44_CHUNK_COUNT=80`
+- `POKER44_REWARD_WINDOW=40`
+- `POKER44_POLL_INTERVAL_SECONDS=300`
+- `POKER44_MINERS_PER_CYCLE=16`
 - `POKER44_PROVIDER_MIN_EVAL_HANDS=40`
 - `POKER44_PROVIDER_MAX_EVAL_HANDS=70`
 - `POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT=true`
 
 Notes:
 
-- `POKER44_EVAL_API_BASE_URL` is the central `poker44-platform-backend` that exposes `/internal/eval/*`
-- the validator talks directly to that central API
-- the central backend itself remains responsible for SQL and chunk generation
-
-## Shared Coordinator Rule
-
-All validators should read from the same Poker44 platform backend / coordinator path so they evaluate miners with the same active chunk.
-
-Today, the intended central source is:
-
-- eval API: `http://185.196.20.208:4001`
-
-## What Gets Automated
-
-In this model, the validator automates only validator-side evaluation:
-
-- polling the central eval API
-- asking for chunk publication when appropriate
-- fetching the active chunk
-- querying miners
-- computing rewards
-- setting weights
-- marking hand tokens evaluated
-
-It does **not** automate:
-
-- provider DNS
-- provider TLS
-- provider frontend/backend deployment
-- local room creation
-- local SQL/Redis
-
-Those belong to Poker44 platform infrastructure, not to the validator.
+- `POKER44_EVAL_API_BASE_URL` points at the central `poker44-platform-backend`;
+- `POKER44_PROVIDER_INTERNAL_SECRET` is required for `/internal/eval/*`;
+- `POKER44_CHUNK_COUNT` controls how many batches/chunks the validator will forward to miners in
+  one cycle;
+- today those batches are usually one sanitized hand/example each.
 
 ## Run Validator
 
-Preferred command:
+Script path:
+
+- `scripts/validator/run/run_vali.sh`
+
+Example:
 
 ```bash
 WALLET_NAME=p44_cold \
@@ -165,9 +212,45 @@ POKER44_EVAL_API_BASE_URL=http://185.196.20.208:4001 \
 ./scripts/validator/run/run_vali.sh
 ```
 
-Script path:
+## Canonical Chunk Lifecycle
 
-- `scripts/validator/run/run_vali.sh`
+The current lifecycle is:
+
+1. platform table generates real hands;
+2. hands are persisted in SQL;
+3. backend selects eligible unconsumed hands;
+4. backend builds sanitized labeled batches from those hands;
+5. backend publishes an active canonical chunk for the current window;
+6. validator fetches it through `/internal/eval/current`;
+7. validator sends the resulting chunk list to miners;
+8. validator scores miner responses against the hidden labels;
+9. validator marks the evaluated hand IDs back to the eval API.
+
+## Current Scoring Granularity
+
+Current scoring granularity is:
+
+- one returned score per chunk;
+- one validator label per chunk;
+- today, one chunk is usually one sanitized hand/example.
+
+This matters for miner/operator expectations:
+
+- the live source is mixed-table gameplay;
+- the current validator scoring contract is still chunk-level;
+- the chunk-level contract is currently implemented as many one-example chunks.
+
+## What the Validator Does Not Do
+
+The production validator does **not**:
+
+- run a local poker table;
+- deploy provider frontend/backend;
+- manage DNS or TLS;
+- manage local SQL/Redis for provider runtime;
+- generate production eval data from local JSON.
+
+Those are platform responsibilities.
 
 ## PM2
 
@@ -178,20 +261,8 @@ pm2 stop poker44_validator
 pm2 delete poker44_validator
 ```
 
-## Canonical Chunk Behavior
-
-The intended chunk lifecycle is:
-
-- real hands are generated on the Poker44 platform table
-- raw hands stay in platform SQL
-- the platform backend builds sanitized labeled batches
-- the active chunk is stored centrally
-- validators fetch that chunk through `/internal/eval/current`
-- validators score miners against the same chunk
-- the platform backend tracks chunk publication and usage centrally
-
 ## Related Docs
 
-- [VALIDATOR_PROVIDER_SETUP.md](/Users/mac/poker44-launch/documentacion/operaciones/VALIDATOR_PROVIDER_SETUP.md)
-- [ENV_MATRIX.md](/Users/mac/poker44-launch/documentacion/operaciones/ENV_MATRIX.md)
-- [RUNBOOK.md](/Users/mac/poker44-launch/documentacion/operaciones/RUNBOOK.md)
+- [Miner guide](./miner.md)
+- [Public benchmark](./public-benchmark.md)
+- [Anti-leakage policy](./anti-leakage.md)

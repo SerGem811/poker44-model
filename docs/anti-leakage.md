@@ -5,10 +5,11 @@ overfitting, memorization, or direct leakage of validator-private human data in 
 
 ## Threat Model
 
-Poker44 validators evaluate miners using private human hands plus generated bot hands.
+Poker44 validators now evaluate miners using sanitized batches derived from live platform tables,
+with humans and bots seated together on the source tables.
 The main failure modes are:
 
-- a miner trains on leaked validator-private human data;
+- a miner trains on leaked private or live evaluation data;
 - a miner memorizes specific hands or chunks instead of learning transferable behavior;
 - a miner hardcodes lookup logic against known evaluation payloads;
 - a miner overfits to public benchmark artifacts and fails to generalize to live validator data.
@@ -53,8 +54,9 @@ The public benchmark must never be treated as a proxy for production validator d
 
 ### 3. Dynamic Private Evaluation Windows
 
-Validators should keep evaluating on rotating windows of private human data and generated bot
-data. A miner that memorizes one static corpus should not be rewarded for long.
+Validators should keep evaluating on rotating live windows sourced from platform gameplay rather
+than any static corpus. A miner that memorizes one repeated payload should not be rewarded for
+long.
 
 ### 4. Generalization-First Reward Interpretation
 

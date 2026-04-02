@@ -44,12 +44,14 @@ class ProviderRuntimeConfig:
 
     @classmethod
     def from_env(cls, *, default_validator_id: str) -> "ProviderRuntimeConfig":
-        api_base_url = _normalize_base_url(
-            os.getenv(
-                "POKER44_EVAL_API_BASE_URL",
-                os.getenv("POKER44_PROVIDER_API_BASE_URL", "http://185.196.20.208:4001"),
+        api_base_url_raw = str(
+            os.getenv("POKER44_EVAL_API_BASE_URL", os.getenv("POKER44_PROVIDER_API_BASE_URL", ""))
+        ).strip()
+        if not api_base_url_raw:
+            raise RuntimeError(
+                "POKER44_EVAL_API_BASE_URL is required when POKER44_RUNTIME_MODE=provider_runtime."
             )
-        )
+        api_base_url = _normalize_base_url(api_base_url_raw)
         internal_secret = str(os.getenv("POKER44_PROVIDER_INTERNAL_SECRET", "")).strip()
         if not internal_secret:
             raise RuntimeError(
