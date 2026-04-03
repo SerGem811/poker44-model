@@ -205,8 +205,15 @@ async def _run_forward_cycle(validator) -> None:
             if not hasattr(validator, "label_buffer"):
                 validator.label_buffer = {}
             
-            validator.prediction_buffer.setdefault(uid, []).extend(scores_f)
-            validator.label_buffer.setdefault(uid, []).extend(effective_labels)
+            max_buffer_size = max(1, int(getattr(validator, "reward_window", len(scores_f) or 1)))
+            prediction_history = validator.prediction_buffer.setdefault(uid, [])
+            label_history = validator.label_buffer.setdefault(uid, [])
+            prediction_history.extend(scores_f)
+            label_history.extend(effective_labels)
+            if len(prediction_history) > max_buffer_size:
+                del prediction_history[:-max_buffer_size]
+            if len(label_history) > max_buffer_size:
+                del label_history[:-max_buffer_size]
             
             bt.logging.info(f"Miner {uid} scored {len(scores_f)} chunks successfully")
         except Exception as e:

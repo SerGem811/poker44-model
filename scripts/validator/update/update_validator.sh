@@ -48,9 +48,9 @@ fi
 
 echo "[INFO] Installing/updating Python dependencies..."
 if [ -f "$REPO_ROOT/requirements.txt" ]; then
-  pip install -r "$REPO_ROOT/requirements.txt"
+  "$PYTHON_BIN" -m pip install -r "$REPO_ROOT/requirements.txt"
 fi
-pip install -e "$REPO_ROOT"
+"$PYTHON_BIN" -m pip install -e "$REPO_ROOT"
 
 if [ -f "$REPO_ROOT/.env" ]; then
   set -a

@@ -405,10 +405,16 @@ class BaseValidatorNeuron(BaseNeuron):
         bt.logging.info(
             "Metagraph updated, re-syncing hotkeys, dendrite pool and moving averages"
         )
+        prediction_buffer = getattr(self, "prediction_buffer", None)
+        label_buffer = getattr(self, "label_buffer", None)
         # Zero out all hotkeys that have been replaced.
         for uid, hotkey in enumerate(self.hotkeys):
             if hotkey != self.metagraph.hotkeys[uid]:
                 self.scores[uid] = 0  # hotkey has been replaced
+                if isinstance(prediction_buffer, dict):
+                    prediction_buffer.pop(uid, None)
+                if isinstance(label_buffer, dict):
+                    label_buffer.pop(uid, None)
 
         # Check to see if the metagraph has changed size.
         # If so, we need to add new hotkeys and moving averages.
@@ -418,6 +424,14 @@ class BaseValidatorNeuron(BaseNeuron):
             min_len = min(len(self.hotkeys), len(self.scores))
             new_moving_average[:min_len] = self.scores[:min_len]
             self.scores = new_moving_average
+
+        if len(self.hotkeys) > len(self.metagraph.hotkeys):
+            removed_uids = range(len(self.metagraph.hotkeys), len(self.hotkeys))
+            for uid in removed_uids:
+                if isinstance(prediction_buffer, dict):
+                    prediction_buffer.pop(uid, None)
+                if isinstance(label_buffer, dict):
+                    label_buffer.pop(uid, None)
 
         # Update the hotkeys.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
