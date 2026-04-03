@@ -48,6 +48,52 @@ def persist_json_registry(path: str | Path | None, payload: Mapping[str, Any]) -
     tmp_path.replace(target_path)
 
 
+def normalize_uid_key_registry(
+    registry: MutableMapping[Any, Any],
+) -> Dict[str, Any]:
+    normalized: Dict[str, Any] = {}
+    for uid in sorted(registry, key=lambda value: int(value)):
+        normalized[str(int(uid))] = registry[uid]
+    return normalized
+
+
+def remove_uid_from_model_manifest_registry(
+    registry: MutableMapping[Any, Any],
+    uid: int,
+) -> bool:
+    return registry.pop(str(int(uid)), None) is not None
+
+
+def remove_uid_from_suspicion_registry(
+    registry: MutableMapping[str, Any],
+    uid: int,
+) -> bool:
+    miners = registry.setdefault("miners", {})
+    removed = miners.pop(str(int(uid)), None) is not None
+    registry["summary"] = {
+        "tracked_miners": len(miners),
+        "last_forward_count": int(registry.get("summary", {}).get("last_forward_count", 0)),
+    }
+    return removed
+
+
+def remove_uid_from_compliance_registry(
+    registry: MutableMapping[str, Any],
+    uid: int,
+) -> bool:
+    miners = registry.setdefault("miners", {})
+    removed = miners.pop(str(int(uid)), None) is not None
+    transparent_count = sum(1 for item in miners.values() if item.get("status") == "transparent")
+    opaque_count = sum(1 for item in miners.values() if item.get("status") == "opaque")
+    registry["summary"] = {
+        "tracked_miners": len(miners),
+        "transparent_miners": transparent_count,
+        "opaque_miners": opaque_count,
+        "last_forward_count": int(registry.get("summary", {}).get("last_forward_count", 0)),
+    }
+    return removed
+
+
 def chunk_fingerprint(chunk: Iterable[Mapping[str, Any]]) -> str:
     encoded = json.dumps(
         list(chunk),

@@ -17,6 +17,7 @@ from poker44.validator.integrity import (
     chunk_fingerprint,
     evaluate_manifest_compliance,
     evaluate_manifest_suspicion,
+    normalize_uid_key_registry,
     persist_json_registry,
     record_served_chunks,
     update_compliance_registry,
@@ -313,7 +314,8 @@ def _record_model_manifest(
         registry = {}
         validator.model_manifest_registry = registry
 
-    previous = registry.get(uid)
+    registry_key = str(int(uid))
+    previous = registry.get(registry_key)
     previous_digest = previous.get("manifest_digest") if previous else None
     if previous_digest == digest:
         return
@@ -323,7 +325,7 @@ def _record_model_manifest(
         "manifest_digest": digest,
         "model_manifest": normalized,
     }
-    registry[uid] = entry
+    registry[registry_key] = entry
 
     bt.logging.info(
         f"Miner {uid} manifest updated | "
@@ -336,12 +338,16 @@ def _record_model_manifest(
     _persist_model_manifest_registry(getattr(validator, "model_manifest_path", None), registry)
 
 
-def _persist_model_manifest_registry(path: str | Path | None, registry: Dict[int, Dict[str, Any]]) -> None:
-    payload = {
-        str(uid): registry[uid]
-        for uid in sorted(registry)
-    }
-    persist_json_registry(path, payload)
+def _persist_model_manifest_registry(
+    path: str | Path | None,
+    registry: Dict[Any, Dict[str, Any]],
+) -> None:
+    # JSON round-tripping turns top-level dict keys into strings. Normalize on
+    # every persist so reloaded registries never mix int and str UIDs.
+    normalized_registry = normalize_uid_key_registry(registry)
+    registry.clear()
+    registry.update(normalized_registry)
+    persist_json_registry(path, normalized_registry)
 
 
 def _record_served_chunk_fingerprints(validator, *, chunks: List[List[dict]], dataset_hash: str) -> None:

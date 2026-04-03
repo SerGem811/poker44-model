@@ -32,7 +32,10 @@ from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
 from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
-from poker44.validator.integrity import load_json_registry
+from poker44.validator.integrity import (
+    load_json_registry,
+    normalize_uid_key_registry,
+)
 from hands_generator.mixed_dataset_provider import (
     DEFAULT_OUTPUT_PATH,
     MixedDatasetConfig,
@@ -106,6 +109,10 @@ class Validator(BaseValidatorNeuron):
         self.suspicion_registry_path = state_dir / "suspicion_registry.json"
         self.served_chunk_registry_path = state_dir / "served_chunk_registry.json"
         self.model_manifest_registry = load_json_registry(self.model_manifest_path)
+        if self.model_manifest_registry:
+            self.model_manifest_registry = normalize_uid_key_registry(
+                self.model_manifest_registry
+            )
         self.compliance_registry = load_json_registry(
             self.compliance_registry_path,
             default={"miners": {}, "summary": {}},

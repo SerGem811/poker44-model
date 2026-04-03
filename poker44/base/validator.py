@@ -31,6 +31,12 @@ from poker44.base.utils.weight_utils import (
     convert_weights_and_uids_for_emit,
 )
 from poker44.utils.config import add_validator_args
+from poker44.validator.integrity import (
+    persist_json_registry,
+    remove_uid_from_compliance_registry,
+    remove_uid_from_model_manifest_registry,
+    remove_uid_from_suspicion_registry,
+)
 
 
 class BaseValidatorNeuron(BaseNeuron):
@@ -407,6 +413,12 @@ class BaseValidatorNeuron(BaseNeuron):
         )
         prediction_buffer = getattr(self, "prediction_buffer", None)
         label_buffer = getattr(self, "label_buffer", None)
+        model_manifest_registry = getattr(self, "model_manifest_registry", None)
+        compliance_registry = getattr(self, "compliance_registry", None)
+        suspicion_registry = getattr(self, "suspicion_registry", None)
+        manifest_registry_changed = False
+        compliance_registry_changed = False
+        suspicion_registry_changed = False
         # Zero out all hotkeys that have been replaced.
         for uid, hotkey in enumerate(self.hotkeys):
             if hotkey != self.metagraph.hotkeys[uid]:
@@ -415,6 +427,21 @@ class BaseValidatorNeuron(BaseNeuron):
                     prediction_buffer.pop(uid, None)
                 if isinstance(label_buffer, dict):
                     label_buffer.pop(uid, None)
+                if isinstance(model_manifest_registry, dict):
+                    manifest_registry_changed = (
+                        remove_uid_from_model_manifest_registry(model_manifest_registry, uid)
+                        or manifest_registry_changed
+                    )
+                if isinstance(compliance_registry, dict):
+                    compliance_registry_changed = (
+                        remove_uid_from_compliance_registry(compliance_registry, uid)
+                        or compliance_registry_changed
+                    )
+                if isinstance(suspicion_registry, dict):
+                    suspicion_registry_changed = (
+                        remove_uid_from_suspicion_registry(suspicion_registry, uid)
+                        or suspicion_registry_changed
+                    )
 
         # Check to see if the metagraph has changed size.
         # If so, we need to add new hotkeys and moving averages.
@@ -432,6 +459,37 @@ class BaseValidatorNeuron(BaseNeuron):
                     prediction_buffer.pop(uid, None)
                 if isinstance(label_buffer, dict):
                     label_buffer.pop(uid, None)
+                if isinstance(model_manifest_registry, dict):
+                    manifest_registry_changed = (
+                        remove_uid_from_model_manifest_registry(model_manifest_registry, uid)
+                        or manifest_registry_changed
+                    )
+                if isinstance(compliance_registry, dict):
+                    compliance_registry_changed = (
+                        remove_uid_from_compliance_registry(compliance_registry, uid)
+                        or compliance_registry_changed
+                    )
+                if isinstance(suspicion_registry, dict):
+                    suspicion_registry_changed = (
+                        remove_uid_from_suspicion_registry(suspicion_registry, uid)
+                        or suspicion_registry_changed
+                    )
+
+        if manifest_registry_changed:
+            persist_json_registry(
+                getattr(self, "model_manifest_path", None),
+                model_manifest_registry,
+            )
+        if compliance_registry_changed:
+            persist_json_registry(
+                getattr(self, "compliance_registry_path", None),
+                compliance_registry,
+            )
+        if suspicion_registry_changed:
+            persist_json_registry(
+                getattr(self, "suspicion_registry_path", None),
+                suspicion_registry,
+            )
 
         # Update the hotkeys.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
