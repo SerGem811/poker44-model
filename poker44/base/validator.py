@@ -527,18 +527,14 @@ class BaseValidatorNeuron(BaseNeuron):
                 f"cannot be broadcast to uids array of shape {uids_array.shape}"
             )
 
-        # Compute forward pass rewards, assumes uids are mutually exclusive.
-        # shape: [ metagraph.n ]
-        scattered_rewards: np.ndarray = np.zeros_like(self.scores)
-        scattered_rewards[uids_array] = rewards
-        bt.logging.debug(f"Scattered rewards: {rewards}")
-
-        # Update scores with rewards produced by this step.
-        # shape: [ metagraph.n ]
+        # Apply EMA only to the UIDs that were actually updated this cycle.
+        # Non-sampled miners should retain their existing score instead of
+        # decaying as if they had received an implicit zero reward.
         alpha: float = self.config.neuron.moving_average_alpha
-        self.scores: np.ndarray = (
-            alpha * scattered_rewards + (1 - alpha) * self.scores
-        )
+        observed_scores = self.scores[uids_array]
+        updated_scores = alpha * rewards + (1 - alpha) * observed_scores
+        bt.logging.debug(f"Observed rewards: {rewards}")
+        self.scores[uids_array] = updated_scores
         bt.logging.debug(f"Updated moving avg scores: {self.scores}")
 
     def save_state(self):
