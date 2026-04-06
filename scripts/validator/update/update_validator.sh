@@ -37,8 +37,27 @@ echo "[INFO] Process: $PROCESS_NAME"
 echo "[INFO] Python: $PYTHON_BIN"
 
 pushd "$REPO_ROOT" > /dev/null
-echo "[INFO] Pulling latest Poker44 code from origin/$TARGET_BRANCH..."
-git pull origin "$TARGET_BRANCH"
+git config --local core.fileMode false || true
+
+AUTO_UPDATE_STASH_CREATED=0
+AUTO_UPDATE_STASH_REF=""
+if [ -n "$(git status --porcelain)" ]; then
+  echo "[WARN] Local changes detected; stashing before update."
+  git stash push --include-untracked -m "poker44-auto-update-prepull" >/dev/null
+  AUTO_UPDATE_STASH_CREATED=1
+  AUTO_UPDATE_STASH_REF="$(git stash list | head -n1 | cut -d: -f1)"
+fi
+
+echo "[INFO] Fetching latest Poker44 code from origin/$TARGET_BRANCH..."
+git fetch origin "$TARGET_BRANCH"
+git merge --ff-only "origin/$TARGET_BRANCH"
+
+if [ "$AUTO_UPDATE_STASH_CREATED" = "1" ] && [ -n "$AUTO_UPDATE_STASH_REF" ]; then
+  echo "[INFO] Restoring stashed local changes..."
+  if ! git stash pop "$AUTO_UPDATE_STASH_REF"; then
+    echo "[WARN] Could not automatically reapply stashed local changes; leaving stash for manual review."
+  fi
+fi
 popd > /dev/null
 
 if [ -x "$REPO_ROOT/$VALIDATOR_ENV_DIR/bin/activate" ]; then

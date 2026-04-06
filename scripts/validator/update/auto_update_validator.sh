@@ -10,7 +10,7 @@ SUBTENSOR_PARAM="${SUBTENSOR_PARAM:---subtensor.network finney}"
 VALIDATOR_ENV_DIR="${VALIDATOR_ENV_DIR:-validator_env}"
 VALIDATOR_EXTRA_ARGS="${VALIDATOR_EXTRA_ARGS:-}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
-STATE_FILE="${STATE_FILE:-.auto_update_state}"
+STATE_FILE="${STATE_FILE:-}"
 SLEEP_INTERVAL="${SLEEP_INTERVAL:-600}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
@@ -19,7 +19,9 @@ if [ -z "$REPO_ROOT" ]; then
   exit 1
 fi
 
-if [[ "$STATE_FILE" != /* ]]; then
+if [ -z "$STATE_FILE" ]; then
+  STATE_FILE="${HOME:-$REPO_ROOT}/.poker44_auto_update_state"
+elif [[ "$STATE_FILE" != /* ]]; then
   STATE_FILE="$REPO_ROOT/$STATE_FILE"
 fi
 
@@ -77,6 +79,7 @@ is_remote_newer() {
 }
 
 chmod +x "$UPDATE_SCRIPT" || echo "[WARN] Could not chmod +x $UPDATE_SCRIPT"
+git -C "$REPO_ROOT" config --local core.fileMode false || true
 
 echo "[INFO] Poker44 auto-update watcher starting in $REPO_ROOT"
 echo "[INFO] Process=$PROCESS_NAME branch=$TARGET_BRANCH env_dir=$VALIDATOR_ENV_DIR"
