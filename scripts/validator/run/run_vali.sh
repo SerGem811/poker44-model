@@ -59,6 +59,10 @@ if ! "$PYTHON_BIN" -c "import bittensor, dotenv, numpy, pandas, sklearn" >/dev/n
     exit 1
 fi
 
+GIT_BRANCH="$(git branch --show-current 2>/dev/null || true)"
+GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)"
+DEPLOY_VERSION="$(grep -E '^VALIDATOR_DEPLOY_VERSION[[:space:]]*=' poker44/__init__.py 2>/dev/null | head -n1 | sed -E 's/^VALIDATOR_DEPLOY_VERSION[[:space:]]*=[[:space:]]*["'\'']([^"'\'']+)["'\'']/\1/')"
+
 pm2 delete $PM2_NAME 2>/dev/null || true
 
 export PYTHONPATH="$(pwd)"
@@ -108,6 +112,7 @@ pm2 save
 
 echo "Validator started: $PM2_NAME"
 echo "View logs: pm2 logs $PM2_NAME"
+echo "Code: branch=${GIT_BRANCH:-<unknown>} commit=${GIT_COMMIT:-<unknown>} deploy_version=${DEPLOY_VERSION:-<unknown>}"
 echo "Config: netuid=$NETUID network=$NETWORK wallet=$WALLET_NAME hotkey=$HOTKEY python=$PYTHON_BIN"
 echo "Subtensor args: ${SUBTENSOR_PARAM:---subtensor.network $NETWORK}"
 echo "Runtime extras: wallet_path=${WALLET_PATH:-<default>} extra_args=${VALIDATOR_EXTRA_ARGS:-<none>}"

@@ -75,6 +75,19 @@ def _git_commit_sha() -> str:
         return ""
 
 
+def _git_branch_name() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "branch", "--show-current"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
 class ValidatorWandbHelper:
     """Best-effort validator telemetry logger for W&B."""
 
@@ -181,6 +194,7 @@ class ValidatorWandbHelper:
         dataset_cfg: Any,
         poll_interval: int,
         reward_window: int,
+        runtime_info: Optional[Mapping[str, Any]] = None,
     ) -> None:
         cfg_dict = asdict(dataset_cfg) if is_dataclass(dataset_cfg) else dict(dataset_cfg)
         safe_cfg = {
@@ -197,8 +211,12 @@ class ValidatorWandbHelper:
                 "validator_startup/poll_interval_seconds": _safe_int(poll_interval),
                 "validator_startup/reward_window": _safe_int(reward_window),
                 "validator_startup/timestamp": datetime.now(tz=UTC).isoformat(),
+                "validator_startup/git_commit": _git_commit_sha(),
+                "validator_startup/git_branch": _git_branch_name(),
             }
         )
+        if runtime_info:
+            payload.update(_flatten_metrics("validator_runtime", runtime_info))
         self.log_payload(payload)
 
     def log_dataset_state(self, *, dataset_hash: str, stats: Mapping[str, Any]) -> None:

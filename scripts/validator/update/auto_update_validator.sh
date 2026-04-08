@@ -42,10 +42,18 @@ get_local_version() {
   extract_named_version "$VERSION_KEY" "$REPO_ROOT/$VERSION_GATES_FILE" || echo ""
 }
 
+get_local_commit() {
+  git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo ""
+}
+
 get_remote_version() {
   git -C "$REPO_ROOT" fetch origin "$TARGET_BRANCH" --quiet || return 1
   git -C "$REPO_ROOT" show "origin/$TARGET_BRANCH:$VERSION_GATES_FILE" 2>/dev/null | \
     extract_named_version "$VERSION_KEY" /dev/stdin || echo ""
+}
+
+get_remote_commit() {
+  git -C "$REPO_ROOT" rev-parse --short "origin/$TARGET_BRANCH" 2>/dev/null || echo ""
 }
 
 upsert_state_value() {
@@ -89,7 +97,10 @@ echo "[INFO] Poll interval: ${SLEEP_INTERVAL}s"
 while true; do
   LOCAL_VERSION="$(get_local_version)"
   REMOTE_VERSION="$(get_remote_version)"
+  LOCAL_COMMIT="$(get_local_commit)"
+  REMOTE_COMMIT="$(get_remote_commit)"
   echo "[INFO] $VERSION_KEY local=$LOCAL_VERSION remote=$REMOTE_VERSION"
+  echo "[INFO] Git commit local=$LOCAL_COMMIT remote=$REMOTE_COMMIT"
 
   if is_remote_newer "$LOCAL_VERSION" "$REMOTE_VERSION"; then
     echo "[INFO] New Poker44 deploy version detected, updating validator"

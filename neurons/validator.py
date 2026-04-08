@@ -27,9 +27,10 @@ from typing import Optional
 import bittensor as bt
 from dotenv import load_dotenv
 
-from poker44 import __version__
+from poker44 import __version__, VALIDATOR_DEPLOY_VERSION
 from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
+from poker44.utils.runtime_info import collect_runtime_info, write_runtime_snapshot
 from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
 from poker44.validator.integrity import (
@@ -152,6 +153,7 @@ class Validator(BaseValidatorNeuron):
             dataset_cfg=self.dataset_cfg,
             poll_interval=self.poll_interval,
             reward_window=self.reward_window,
+            runtime_info=self.runtime_info,
         )
         bt.logging.info(
             "🪟 Validator sync mode | "
@@ -160,12 +162,54 @@ class Validator(BaseValidatorNeuron):
             f"direct_score_update={self.sync_direct_score_update} "
             f"reset_buffers_on_window_change={self.sync_reset_buffers_on_window_change}"
         )
+        bt.logging.info(
+            "🧾 Validator runtime | "
+            f"uid={self.resolve_uid(self.wallet.hotkey.ss58_address)} "
+            f"hotkey={self.wallet.hotkey.ss58_address} "
+            f"version={__version__} "
+            f"deploy_version={VALIDATOR_DEPLOY_VERSION} "
+            f"git_branch={self.runtime_info.get('git_branch', '')} "
+            f"git_commit={self.runtime_info.get('git_commit_short', '')} "
+            f"git_dirty={self.runtime_info.get('git_dirty', False)}"
+        )
+        self._write_runtime_snapshot(status="started")
 
     def resolve_uid(self, hotkey: str) -> Optional[int]:
         try:
             return self.metagraph.hotkeys.index(hotkey)
         except ValueError:
             return None
+
+    @property
+    def runtime_snapshot_path(self) -> Path:
+        return Path(self.config.neuron.full_path) / "validator_runtime.json"
+
+    @property
+    def runtime_info(self) -> dict:
+        info = getattr(self, "_runtime_info", None)
+        if info is None:
+            info = collect_runtime_info()
+            self._runtime_info = info
+        return info
+
+    def _write_runtime_snapshot(self, *, status: str, extra: Optional[dict] = None) -> None:
+        payload = {
+            "status": status,
+            "validator_uid": self.resolve_uid(self.wallet.hotkey.ss58_address),
+            "hotkey": self.wallet.hotkey.ss58_address,
+            "version": __version__,
+            "deploy_version": VALIDATOR_DEPLOY_VERSION,
+            "netuid": self.config.netuid,
+            "poll_interval": self.poll_interval,
+            "reward_window": self.reward_window,
+            "synced_window_mode": self.synced_window_mode,
+            "sync_all_miners": self.sync_all_miners,
+            "sync_direct_score_update": self.sync_direct_score_update,
+            "runtime": self.runtime_info,
+        }
+        if extra:
+            payload.update(extra)
+        write_runtime_snapshot(self.runtime_snapshot_path, payload)
 
     async def forward(self, synapse=None):  # type: ignore[override]
         return await forward_cycle(self)

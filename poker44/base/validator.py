@@ -285,6 +285,7 @@ class BaseValidatorNeuron(BaseNeuron):
         )
         bt.logging.debug("uint_weights", uint_weights)
         bt.logging.debug("uint_uids", uint_uids)
+        nonzero_uids = len(uint_uids)
 
         wait_for_inclusion = bool(self.config.neuron.wait_for_inclusion)
         wait_for_finalization = bool(self.config.neuron.wait_for_finalization)
@@ -336,6 +337,18 @@ class BaseValidatorNeuron(BaseNeuron):
             bt.logging.info(f"set_weights submitted to chain without confirmation: {msg}")
         else:
             bt.logging.error("set_weights failed", msg)
+        write_snapshot = getattr(self, "_write_runtime_snapshot", None)
+        if callable(write_snapshot):
+            write_snapshot(
+                status="running",
+                extra={
+                    "last_set_weights_success": bool(result),
+                    "last_set_weights_message": str(msg),
+                    "last_set_weights_wait_for_inclusion": wait_for_inclusion,
+                    "last_set_weights_wait_for_finalization": wait_for_finalization,
+                    "last_set_weights_nonzero_uids": nonzero_uids,
+                },
+            )
         wandb_helper = getattr(self, "wandb_helper", None)
         if wandb_helper is not None:
             wandb_helper.log_set_weights_result(
@@ -564,6 +577,16 @@ class BaseValidatorNeuron(BaseNeuron):
             scores=self.scores,
             hotkeys=self.hotkeys,
         )
+        write_snapshot = getattr(self, "_write_runtime_snapshot", None)
+        if callable(write_snapshot):
+            write_snapshot(
+                status="running",
+                extra={
+                    "step": int(self.step),
+                    "score_slots": int(len(self.scores)),
+                    "nonzero_scores": int(np.count_nonzero(self.scores)),
+                },
+            )
 
     def load_state(self):
         """Loads the state of the validator from a file."""

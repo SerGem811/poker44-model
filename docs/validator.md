@@ -132,6 +132,19 @@ pm2 stop poker44_validator
 pm2 delete poker44_validator
 ```
 
+Startup logs now include:
+
+- validator UID and hotkey
+- subnet code version
+- `VALIDATOR_DEPLOY_VERSION`
+- git branch / short commit / dirty state
+
+The validator also writes a local runtime snapshot to:
+
+- `$(full_path)/validator_runtime.json`
+
+That snapshot is updated automatically and includes the current version/deploy metadata, sync mode flags, latest `set_weights` result, and basic score-state counters.
+
 ---
 
 ## Auto-Update
@@ -201,6 +214,12 @@ pm2 restart poker44_auto_update --update-env
 pm2 stop poker44_auto_update
 pm2 delete poker44_auto_update
 ```
+
+The auto-update watcher now logs:
+
+- local vs remote `VALIDATOR_DEPLOY_VERSION`
+- local vs remote git commit
+- updated commit after a successful pull
 
 Notes:
 

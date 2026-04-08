@@ -35,6 +35,7 @@ echo "[INFO] Repo root: $REPO_ROOT"
 echo "[INFO] Branch: $TARGET_BRANCH"
 echo "[INFO] Process: $PROCESS_NAME"
 echo "[INFO] Python: $PYTHON_BIN"
+echo "[INFO] Current commit: $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 pushd "$REPO_ROOT" > /dev/null
 git config --local core.fileMode false || true
@@ -51,6 +52,7 @@ fi
 echo "[INFO] Fetching latest Poker44 code from origin/$TARGET_BRANCH..."
 git fetch origin "$TARGET_BRANCH"
 git merge --ff-only "origin/$TARGET_BRANCH"
+echo "[INFO] Updated commit: $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 if [ "$AUTO_UPDATE_STASH_CREATED" = "1" ] && [ -n "$AUTO_UPDATE_STASH_REF" ]; then
   echo "[INFO] Restoring stashed local changes..."
