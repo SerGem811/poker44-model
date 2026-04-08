@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
@@ -17,6 +18,9 @@ MIN_REQUIRED_MANIFEST_FIELDS = [
     "training_data_statement",
     "private_data_attestation",
 ]
+REFERENCE_MINER_MODEL_NAME = "poker44-reference-heuristic"
+REFERENCE_REPO_URL = "https://github.com/Poker44/Poker44-subnet"
+GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
 def _parse_bool(value: str | None, *, default: bool = False) -> bool:
@@ -172,6 +176,25 @@ def manifest_digest(manifest: Optional[Mapping[str, Any]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _uses_reference_repo(manifest: Mapping[str, Any]) -> bool:
+    return str(manifest.get("repo_url", "")).strip().rstrip("/") == REFERENCE_REPO_URL
+
+
+def _is_reference_miner_manifest(manifest: Mapping[str, Any]) -> bool:
+    return str(manifest.get("model_name", "")).strip() == REFERENCE_MINER_MODEL_NAME
+
+
+def _has_implementation_files(manifest: Mapping[str, Any]) -> bool:
+    value = manifest.get("implementation_files")
+    if not isinstance(value, (list, tuple)):
+        return False
+    return any(str(item).strip() for item in value)
+
+
+def _looks_like_git_commit(value: Any) -> bool:
+    return bool(GIT_COMMIT_RE.fullmatch(str(value).strip()))
+
+
 def evaluate_manifest_compliance(manifest: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     """Classify whether a manifest meets the current transparent-miner standard."""
     if not manifest:
@@ -180,6 +203,7 @@ def evaluate_manifest_compliance(manifest: Optional[Mapping[str, Any]]) -> Dict[
             "missing_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
             "required_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
             "open_source": False,
+            "policy_violations": [],
         }
 
     missing_fields: List[str] = []
@@ -196,10 +220,22 @@ def evaluate_manifest_compliance(manifest: Optional[Mapping[str, Any]]) -> Dict[
             missing_fields.append(field)
             continue
 
-    status = "transparent" if not missing_fields else "opaque"
+    if not _has_implementation_files(manifest):
+        missing_fields.append("implementation_files")
+    if not str(manifest.get("implementation_sha256", "")).strip():
+        missing_fields.append("implementation_sha256")
+
+    policy_violations: List[str] = []
+    if not _looks_like_git_commit(manifest.get("repo_commit", "")):
+        policy_violations.append("repo_commit_invalid")
+    if _uses_reference_repo(manifest) and not _is_reference_miner_manifest(manifest):
+        policy_violations.append("repo_url_must_point_to_model_repo")
+
+    status = "transparent" if not missing_fields and not policy_violations else "opaque"
     return {
         "status": status,
         "missing_fields": missing_fields,
         "required_fields": list(MIN_REQUIRED_MANIFEST_FIELDS),
         "open_source": bool(manifest.get("open_source", False)),
+        "policy_violations": policy_violations,
     }

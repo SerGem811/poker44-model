@@ -244,6 +244,7 @@ def update_compliance_registry(
         "uid": int(uid),
         "status": str(compliance.get("status", "opaque")),
         "missing_fields": list(compliance.get("missing_fields", [])),
+        "policy_violations": list(compliance.get("policy_violations", [])),
         "required_fields": list(compliance.get("required_fields", MIN_REQUIRED_MANIFEST_FIELDS)),
         "open_source": bool(compliance.get("open_source", False)),
         "manifest_digest": manifest_digest,
