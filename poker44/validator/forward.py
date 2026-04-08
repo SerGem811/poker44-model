@@ -524,10 +524,13 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
         bt.logging.info("Synchronized validator mode: querying all eligible miners.")
     elif target_uids is None and miners_per_cycle > 0 and len(miner_uids) > miners_per_cycle:
         # Rotate deterministically through the eligible set so coverage expands over time
-        # without blasting every miner on each cycle. Rotation is keyed to the
-        # shared evaluation window, not each validator's local forward count.
+        # without blasting every miner on each cycle. Offset each validator's
+        # rotation so synchronized validators do not all sample the same block
+        # of miners inside a shared evaluation window.
         shared_window_id = int(getattr(validator, "current_eval_window_id", 0) or 0)
-        offset = (shared_window_id * miners_per_cycle) % len(miner_uids)
+        validator_uid = int(getattr(validator, "uid", 0) or 0)
+        stagger = validator_uid % len(miner_uids)
+        offset = ((shared_window_id * miners_per_cycle) + stagger) % len(miner_uids)
         rotated = list(zip(miner_uids, axons))
         rotated = rotated[offset:] + rotated[:offset]
         selected = rotated[:miners_per_cycle]
@@ -535,7 +538,7 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
         axons = [axon for _, axon in selected]
         bt.logging.info(
             f"Sampling {miners_per_cycle} miners this cycle from {len(rotated)} eligible miners "
-            f"(window rotation offset={offset})."
+            f"(window rotation offset={offset}, validator_stagger={stagger})."
         )
 
     bt.logging.info(f"Eligible miners this cycle: {miner_uids}")

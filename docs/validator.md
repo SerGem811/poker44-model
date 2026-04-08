@@ -63,7 +63,7 @@ Optional tuning:
 - `POKER44_MIN_HANDS_PER_CHUNK` (default `60`)
 - `POKER44_MAX_HANDS_PER_CHUNK` (default `120`)
 - `POKER44_HUMAN_RATIO` (default `0.5`)
-- `POKER44_MINERS_PER_CYCLE` (default `16`; set `0` or a negative value to query all eligible miners)
+- `POKER44_MINERS_PER_CYCLE` (default `24`; set `0` or a negative value to query all eligible miners)
 - `POKER44_TARGET_MINER_UIDS` (comma-separated UIDs, useful for controlled local tests)
 - `--neuron.timeout` (default `60s`, validator -> miner query timeout)
 - `--wandb.off` (disable Weights & Biases logging)
@@ -85,7 +85,9 @@ POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
 POKER44_CHUNK_COUNT=40 \
 POKER44_REWARD_WINDOW=40 \
 POKER44_POLL_INTERVAL_SECONDS=300 \
-POKER44_MINERS_PER_CYCLE=16 \
+POKER44_MINERS_PER_CYCLE=24 \
+POKER44_SYNC_DIRECT_SCORE_UPDATE=false \
+POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE=false \
 pm2 start python --name poker44_validator -- \
   ./neurons/validator.py \
   --netuid 126 \
@@ -120,7 +122,9 @@ POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
 POKER44_CHUNK_COUNT=40 \
 POKER44_REWARD_WINDOW=40 \
 POKER44_POLL_INTERVAL_SECONDS=300 \
-POKER44_MINERS_PER_CYCLE=16 \
+POKER44_MINERS_PER_CYCLE=24 \
+POKER44_SYNC_DIRECT_SCORE_UPDATE=false \
+POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE=false \
 NEURON_TIMEOUT=60 \
 ./scripts/validator/run/run_vali.sh
 ```
@@ -275,14 +279,16 @@ Default production cadence:
 
 - dataset refresh: every `3600s`
 - query loop: every `300s` unless overridden
-- miner fanout: `16` miners per cycle by default, rotating across the eligible set
+- miner fanout: `24` miners per cycle by default, rotating across the eligible set
 
 Validated starting profile:
 
 - `POKER44_CHUNK_COUNT=40`
 - `POKER44_REWARD_WINDOW=40`
 - `--neuron.timeout 60`
-- `POKER44_MINERS_PER_CYCLE=16`
+- `POKER44_MINERS_PER_CYCLE=24`
+- `POKER44_SYNC_DIRECT_SCORE_UPDATE=false`
+- `POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE=false`
 
 These defaults were validated as a practical starting point for production-like runs:
 
@@ -290,6 +296,7 @@ These defaults were validated as a practical starting point for production-like 
 - `40` chunks with `60s` timeout completed successfully;
 - setting `POKER44_REWARD_WINDOW=40` allows miners to receive non-zero weights from the first completed cycle.
 - querying the full eligible set in one cycle degraded useful miner responses; rotating a subset per cycle was more stable.
+- increasing fanout modestly while keeping persistent scoring reduces sampling noise without reintroducing the worst timeout behavior.
 
 ---
 
