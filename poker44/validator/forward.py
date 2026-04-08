@@ -76,9 +76,40 @@ async def _run_forward_cycle(validator) -> None:
             )
         await asyncio.sleep(validator.poll_interval)
         return
+
+    provider_stats = getattr(validator.provider, "stats", {}) or {}
+    current_window_id = provider_stats.get("window_id")
+    try:
+        resolved_window_id = (
+            int(current_window_id) if current_window_id is not None else None
+        )
+    except (TypeError, ValueError):
+        resolved_window_id = None
+
+    previous_window_id = getattr(validator, "current_eval_window_id", None)
+    if (
+        getattr(validator, "sync_reset_buffers_on_window_change", False)
+        and resolved_window_id is not None
+        and previous_window_id is not None
+        and previous_window_id != resolved_window_id
+    ):
+        validator.prediction_buffer = {}
+        validator.label_buffer = {}
+        bt.logging.info(
+            f"Eval window changed ({previous_window_id} -> {resolved_window_id}); "
+            "cleared local buffers."
+        )
+    validator.current_eval_window_id = resolved_window_id
+    bt.logging.info(
+        "Using evaluation snapshot | "
+        f"window_id={resolved_window_id} "
+        f"dataset_hash={getattr(validator.provider, 'dataset_hash', '')[:12]}"
+    )
     
     miner_uids, axons = _get_candidate_miners(validator)
     responses: Dict[int, List[float]] = {uid: [] for uid in miner_uids}
+    cycle_predictions: Dict[int, List[float]] = {uid: [] for uid in miner_uids}
+    cycle_labels: Dict[int, List[int]] = {uid: [] for uid in miner_uids}
 
     if not miner_uids:
         bt.logging.info("No eligible miner UIDs available for this cycle.")
@@ -137,7 +168,6 @@ async def _run_forward_cycle(validator) -> None:
         dataset_hash=getattr(validator.provider, "dataset_hash", ""),
     )
     if wandb_helper is not None:
-        provider_stats = getattr(validator.provider, "stats", {})
         wandb_helper.log_dataset_state(
             dataset_hash=getattr(validator.provider, "dataset_hash", ""),
             stats=provider_stats,
@@ -199,6 +229,8 @@ async def _run_forward_cycle(validator) -> None:
                 effective_labels = batch_labels
             
             responses[uid].extend(scores_f)
+            cycle_predictions[uid].extend(scores_f)
+            cycle_labels[uid].extend(effective_labels)
             
             # Store predictions and labels (one per chunk)
             if not hasattr(validator, "prediction_buffer"):
@@ -244,14 +276,24 @@ async def _run_forward_cycle(validator) -> None:
         await asyncio.sleep(validator.poll_interval)
         return
     
-    rewards_array, metrics = _compute_windowed_rewards(validator, miner_uids)
+    if getattr(validator, "sync_direct_score_update", False):
+        rewards_array, metrics = _compute_cycle_rewards(
+            miner_uids,
+            cycle_predictions=cycle_predictions,
+            cycle_labels=cycle_labels,
+        )
+    else:
+        rewards_array, metrics = _compute_windowed_rewards(validator, miner_uids)
     reward_map = dict(zip(miner_uids, rewards_array.tolist()))
     metrics_map = {uid: metric for uid, metric in zip(miner_uids, metrics)}
     bt.logging.info(f"Reward map by UID: {reward_map}")
     bt.logging.info(f"Reward metrics by UID: {metrics_map}")
     winner_uids, winner_rewards = _select_weight_targets(reward_map)
 
-    validator.update_scores(winner_rewards, winner_uids)
+    if getattr(validator, "sync_direct_score_update", False):
+        _apply_synced_scores(validator, winner_uids, winner_rewards)
+    else:
+        validator.update_scores(winner_rewards, winner_uids)
     if wandb_helper is not None:
         successful_miners = sum(1 for scores in responses.values() if scores)
         wandb_helper.log_forward_summary(
@@ -267,6 +309,8 @@ async def _run_forward_cycle(validator) -> None:
                 "forward/status": "ok",
                 "forward/human_chunk_count": sum(1 for label in batch_labels if label == 0),
                 "forward/bot_chunk_count": sum(1 for label in batch_labels if label == 1),
+                "forward/window_id": resolved_window_id if resolved_window_id is not None else -1,
+                "forward/miner_uid_count": len(miner_uids),
             },
         )
         wandb_helper.log_reward_summary(
@@ -434,8 +478,8 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
     miner_uids: List[int] = []
     axons: List = []
     target_uids_env = os.getenv("POKER44_TARGET_MINER_UIDS", "").strip()
-    miners_per_cycle_env = os.getenv("POKER44_MINERS_PER_CYCLE", "16").strip()
-    miners_per_cycle = 16
+    miners_per_cycle_env = os.getenv("POKER44_MINERS_PER_CYCLE", "0").strip()
+    miners_per_cycle = 0
     target_uids = None
     if target_uids_env:
         try:
@@ -454,9 +498,9 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
         miners_per_cycle = int(miners_per_cycle_env)
     except ValueError:
         bt.logging.warning(
-            f"Invalid POKER44_MINERS_PER_CYCLE={miners_per_cycle_env!r}; defaulting to 16."
+            f"Invalid POKER44_MINERS_PER_CYCLE={miners_per_cycle_env!r}; defaulting to all eligible miners."
         )
-        miners_per_cycle = 16
+        miners_per_cycle = 0
 
     for uid, axon in enumerate(validator.metagraph.axons):
         if uid == UID_ZERO:
@@ -472,10 +516,18 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
         miner_uids.append(uid)
         axons.append(axon)
 
-    if target_uids is None and miners_per_cycle > 0 and len(miner_uids) > miners_per_cycle:
+    ordered = sorted(zip(miner_uids, axons), key=lambda item: item[0])
+    miner_uids = [uid for uid, _ in ordered]
+    axons = [axon for _, axon in ordered]
+
+    if getattr(validator, "sync_all_miners", False):
+        bt.logging.info("Synchronized validator mode: querying all eligible miners.")
+    elif target_uids is None and miners_per_cycle > 0 and len(miner_uids) > miners_per_cycle:
         # Rotate deterministically through the eligible set so coverage expands over time
-        # without blasting every miner on each cycle.
-        offset = ((getattr(validator, "forward_count", 1) - 1) * miners_per_cycle) % len(miner_uids)
+        # without blasting every miner on each cycle. Rotation is keyed to the
+        # shared evaluation window, not each validator's local forward count.
+        shared_window_id = int(getattr(validator, "current_eval_window_id", 0) or 0)
+        offset = (shared_window_id * miners_per_cycle) % len(miner_uids)
         rotated = list(zip(miner_uids, axons))
         rotated = rotated[offset:] + rotated[:offset]
         selected = rotated[:miners_per_cycle]
@@ -483,7 +535,7 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
         axons = [axon for _, axon in selected]
         bt.logging.info(
             f"Sampling {miners_per_cycle} miners this cycle from {len(rotated)} eligible miners "
-            f"(rotation offset={offset})."
+            f"(window rotation offset={offset})."
         )
 
     bt.logging.info(f"Eligible miners this cycle: {miner_uids}")
@@ -522,6 +574,56 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
     rewards_array = np.asarray(rewards, dtype=np.float32)
     
     return rewards_array, metrics
+
+
+def _compute_cycle_rewards(
+    miner_uids: List[int],
+    *,
+    cycle_predictions: Dict[int, List[float]],
+    cycle_labels: Dict[int, List[int]],
+) -> tuple[np.ndarray, list]:
+    rewards: List[float] = []
+    metrics: List[dict] = []
+
+    for uid in miner_uids:
+        preds = cycle_predictions.get(uid, [])
+        labels = cycle_labels.get(uid, [])
+
+        if not preds or not labels or len(preds) != len(labels):
+            rewards.append(0.0)
+            metrics.append(
+                {
+                    "fpr": 1.0,
+                    "bot_recall": 0.0,
+                    "ap_score": 0.0,
+                    "human_safety_penalty": 0.0,
+                    "base_score": 0.0,
+                    "reward": 0.0,
+                }
+            )
+            continue
+
+        preds_arr = np.asarray(preds, dtype=float)
+        labels_arr = np.asarray(labels, dtype=bool)
+        rew, metric = reward(preds_arr, labels_arr)
+        rewards.append(rew)
+        metrics.append(metric)
+
+    return np.asarray(rewards, dtype=np.float32), metrics
+
+
+def _apply_synced_scores(
+    validator,
+    winner_uids: List[int],
+    winner_rewards: np.ndarray,
+) -> None:
+    validator.scores = np.zeros_like(validator.scores)
+    for uid, reward_value in zip(winner_uids, winner_rewards.tolist()):
+        validator.scores[int(uid)] = float(reward_value)
+    bt.logging.info(
+        "Applied direct synchronized score vector for current evaluation window "
+        f"(weight_targets={len(winner_uids)})."
+    )
 
 
 def _select_weight_targets(reward_map: Dict[int, float]) -> tuple[List[int], np.ndarray]:

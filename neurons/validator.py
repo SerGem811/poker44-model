@@ -48,6 +48,11 @@ bt.logging.set_trace()
 bt.logging(debug=True, trace=False, logging_dir="./logs", record_log=True)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, str(default))).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 class Validator(BaseValidatorNeuron):
     """Poker44 validator neuron wired into the BaseValidator scaffold."""
 
@@ -101,6 +106,17 @@ class Validator(BaseValidatorNeuron):
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )
         self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
+        self.synced_window_mode = _env_bool("POKER44_SYNCED_WINDOW_MODE", True)
+        self.sync_all_miners = _env_bool("POKER44_SYNC_ALL_MINERS", self.synced_window_mode)
+        self.sync_direct_score_update = _env_bool(
+            "POKER44_SYNC_DIRECT_SCORE_UPDATE",
+            self.synced_window_mode,
+        )
+        self.sync_reset_buffers_on_window_change = _env_bool(
+            "POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE",
+            self.synced_window_mode,
+        )
+        self.current_eval_window_id: Optional[int] = None
         self.prediction_buffer = {}
         self.label_buffer = {}
         state_dir = Path(self.config.neuron.full_path)
@@ -136,6 +152,13 @@ class Validator(BaseValidatorNeuron):
             dataset_cfg=self.dataset_cfg,
             poll_interval=self.poll_interval,
             reward_window=self.reward_window,
+        )
+        bt.logging.info(
+            "🪟 Validator sync mode | "
+            f"synced_window_mode={self.synced_window_mode} "
+            f"sync_all_miners={self.sync_all_miners} "
+            f"direct_score_update={self.sync_direct_score_update} "
+            f"reset_buffers_on_window_change={self.sync_reset_buffers_on_window_change}"
         )
 
     def resolve_uid(self, hotkey: str) -> Optional[int]:
