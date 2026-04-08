@@ -2,9 +2,9 @@
 
 # Emission burning mechanism
 BURN_EMISSIONS = True              # Enable emission burning to UID 0
-BURN_FRACTION = 0.97               # Fraction of emissions to burn
+BURN_FRACTION = 0.95               # Fraction of emissions to burn
 KEEP_FRACTION = 1.0 - BURN_FRACTION  # Fraction of emissions to distribute
 UID_ZERO = 0                       # UID representing the burn address
 
 # Reward distribution mechanism
-WINNER_TAKE_ALL = False            # Distribute emissions proportionally across eligible miners
+WINNER_TAKE_ALL = False            # Distribute emissions across a fixed podium
