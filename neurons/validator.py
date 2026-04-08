@@ -53,6 +53,10 @@ os.makedirs("./logs", exist_ok=True)
 bt.logging.set_trace()
 bt.logging(debug=True, trace=False, logging_dir="./logs", record_log=True)
 
+DEFAULT_VALIDATOR_RUNTIME_REPORT_URL = (
+    "https://api.poker44.net/internal/validators/runtime"
+)
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = str(os.getenv(name, str(default))).strip().lower()
@@ -215,7 +219,12 @@ class Validator(BaseValidatorNeuron):
         if extra:
             payload.update(extra)
         write_runtime_snapshot(self.runtime_snapshot_path, payload)
-        report_url = str(os.getenv("POKER44_VALIDATOR_RUNTIME_REPORT_URL", "")).strip()
+        report_url = str(
+            os.getenv(
+                "POKER44_VALIDATOR_RUNTIME_REPORT_URL",
+                DEFAULT_VALIDATOR_RUNTIME_REPORT_URL,
+            )
+        ).strip()
         if report_url:
             timeout_seconds = float(
                 os.getenv("POKER44_VALIDATOR_RUNTIME_REPORT_TIMEOUT_SECONDS", "5")
