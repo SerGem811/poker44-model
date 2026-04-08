@@ -71,6 +71,9 @@ Optional tuning:
 - `--wandb.project_name` (default `poker44-validators`)
 - `--wandb.entity` (optional W&B entity/team)
 - `--wandb.notes` (optional run notes)
+- `POKER44_VALIDATOR_RUNTIME_REPORT_URL` (optional central collector URL, e.g. `https://.../internal/validators/runtime`)
+- `POKER44_VALIDATOR_RUNTIME_SECRET` (shared secret for the central runtime collector)
+- `POKER44_VALIDATOR_RUNTIME_REPORT_TIMEOUT_SECONDS` (default `5`)
 
 ---
 
@@ -144,6 +147,8 @@ The validator also writes a local runtime snapshot to:
 - `$(full_path)/validator_runtime.json`
 
 That snapshot is updated automatically and includes the current version/deploy metadata, sync mode flags, latest `set_weights` result, and basic score-state counters.
+
+If `POKER44_VALIDATOR_RUNTIME_REPORT_URL` and `POKER44_VALIDATOR_RUNTIME_SECRET` are set, the same snapshot is also pushed automatically to the central collector so subnet operators can inspect validator versions and runtime health without SSHing into each machine.
 
 ---
 

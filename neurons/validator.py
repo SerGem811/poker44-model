@@ -30,7 +30,11 @@ from dotenv import load_dotenv
 from poker44 import __version__, VALIDATOR_DEPLOY_VERSION
 from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
-from poker44.utils.runtime_info import collect_runtime_info, write_runtime_snapshot
+from poker44.utils.runtime_info import (
+    collect_runtime_info,
+    post_runtime_snapshot,
+    write_runtime_snapshot,
+)
 from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
 from poker44.validator.integrity import (
@@ -210,6 +214,27 @@ class Validator(BaseValidatorNeuron):
         if extra:
             payload.update(extra)
         write_runtime_snapshot(self.runtime_snapshot_path, payload)
+        report_url = str(os.getenv("POKER44_VALIDATOR_RUNTIME_REPORT_URL", "")).strip()
+        report_secret = str(os.getenv("POKER44_VALIDATOR_RUNTIME_SECRET", "")).strip()
+        if report_url and report_secret:
+            timeout_seconds = float(
+                os.getenv("POKER44_VALIDATOR_RUNTIME_REPORT_TIMEOUT_SECONDS", "5")
+            )
+            ok, message = post_runtime_snapshot(
+                url=report_url,
+                secret=report_secret,
+                payload=payload,
+                timeout_seconds=timeout_seconds,
+            )
+            if ok:
+                bt.logging.debug(
+                    f"Validator runtime snapshot reported successfully to collector: {report_url}"
+                )
+            else:
+                bt.logging.warning(
+                    "Validator runtime snapshot report failed | "
+                    f"url={report_url} message={message}"
+                )
 
     async def forward(self, synapse=None):  # type: ignore[override]
         return await forward_cycle(self)

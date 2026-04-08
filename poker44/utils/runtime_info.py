@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -48,3 +50,32 @@ def write_runtime_snapshot(path: Path, payload: Mapping[str, Any]) -> None:
     with temp_path.open("w", encoding="ascii") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
     temp_path.replace(path)
+
+
+def post_runtime_snapshot(
+    *,
+    url: str,
+    secret: str,
+    payload: Mapping[str, Any],
+    timeout_seconds: float = 5.0,
+) -> tuple[bool, str]:
+    data = json.dumps(payload, sort_keys=True).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={
+            "content-type": "application/json",
+            "x-validator-runtime-secret": secret,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            status = getattr(response, "status", 200)
+            body = response.read().decode("utf-8", errors="replace")
+        return 200 <= int(status) < 300, body[:500]
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        return False, f"http_{exc.code}:{body[:500]}"
+    except Exception as exc:
+        return False, str(exc)
