@@ -478,7 +478,7 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
     miner_uids: List[int] = []
     axons: List = []
     target_uids_env = os.getenv("POKER44_TARGET_MINER_UIDS", "").strip()
-    miners_per_cycle_env = os.getenv("POKER44_MINERS_PER_CYCLE", "0").strip()
+    miners_per_cycle_env = os.getenv("POKER44_MINERS_PER_CYCLE", "16").strip()
     miners_per_cycle = 0
     target_uids = None
     if target_uids_env:
@@ -498,9 +498,9 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
         miners_per_cycle = int(miners_per_cycle_env)
     except ValueError:
         bt.logging.warning(
-            f"Invalid POKER44_MINERS_PER_CYCLE={miners_per_cycle_env!r}; defaulting to all eligible miners."
+            f"Invalid POKER44_MINERS_PER_CYCLE={miners_per_cycle_env!r}; defaulting to 16 miners per cycle."
         )
-        miners_per_cycle = 0
+        miners_per_cycle = 16
 
     for uid, axon in enumerate(validator.metagraph.axons):
         if uid == UID_ZERO:

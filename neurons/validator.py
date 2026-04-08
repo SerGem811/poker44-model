@@ -107,7 +107,7 @@ class Validator(BaseValidatorNeuron):
         )
         self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
         self.synced_window_mode = _env_bool("POKER44_SYNCED_WINDOW_MODE", True)
-        self.sync_all_miners = _env_bool("POKER44_SYNC_ALL_MINERS", self.synced_window_mode)
+        self.sync_all_miners = _env_bool("POKER44_SYNC_ALL_MINERS", False)
         self.sync_direct_score_update = _env_bool(
             "POKER44_SYNC_DIRECT_SCORE_UPDATE",
             self.synced_window_mode,
