@@ -31,6 +31,7 @@ from poker44 import __version__, VALIDATOR_DEPLOY_VERSION
 from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
 from poker44.utils.runtime_info import (
+    build_signed_runtime_request,
     collect_runtime_info,
     post_runtime_snapshot,
     write_runtime_snapshot,
@@ -215,16 +216,20 @@ class Validator(BaseValidatorNeuron):
             payload.update(extra)
         write_runtime_snapshot(self.runtime_snapshot_path, payload)
         report_url = str(os.getenv("POKER44_VALIDATOR_RUNTIME_REPORT_URL", "")).strip()
-        report_secret = str(os.getenv("POKER44_VALIDATOR_RUNTIME_SECRET", "")).strip()
-        if report_url and report_secret:
+        if report_url:
             timeout_seconds = float(
                 os.getenv("POKER44_VALIDATOR_RUNTIME_REPORT_TIMEOUT_SECONDS", "5")
             )
+            signed_request = build_signed_runtime_request(
+                wallet=self.wallet,
+                url=report_url,
+                payload=payload,
+            )
             ok, message = post_runtime_snapshot(
                 url=report_url,
-                secret=report_secret,
                 payload=payload,
                 timeout_seconds=timeout_seconds,
+                **signed_request,
             )
             if ok:
                 bt.logging.debug(

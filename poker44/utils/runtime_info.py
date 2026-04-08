@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import subprocess
 import time
 import urllib.error
 import urllib.request
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,7 +58,10 @@ def write_runtime_snapshot(path: Path, payload: Mapping[str, Any]) -> None:
 def post_runtime_snapshot(
     *,
     url: str,
-    secret: str,
+    hotkey_ss58: str,
+    signature_hex: str,
+    nonce: str,
+    timestamp: int,
     payload: Mapping[str, Any],
     timeout_seconds: float = 5.0,
 ) -> tuple[bool, str]:
@@ -66,7 +72,10 @@ def post_runtime_snapshot(
         method="POST",
         headers={
             "content-type": "application/json",
-            "x-validator-runtime-secret": secret,
+            "x-validator-hotkey": hotkey_ss58,
+            "x-validator-signature": signature_hex,
+            "x-validator-nonce": nonce,
+            "x-validator-timestamp": str(timestamp),
         },
     )
     try:
@@ -79,3 +88,24 @@ def post_runtime_snapshot(
         return False, f"http_{exc.code}:{body[:500]}"
     except Exception as exc:
         return False, str(exc)
+
+
+def build_signed_runtime_request(
+    *,
+    wallet: Any,
+    url: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    path = urlparse(url).path or "/"
+    nonce = secrets.token_hex(16)
+    timestamp = int(time.time())
+    body_hash = sha256(encoded).hexdigest()
+    message = f"{timestamp}:{nonce}:POST:{path}:{body_hash}"
+    signature_hex = wallet.hotkey.sign(message.encode()).hex()
+    return {
+        "hotkey_ss58": wallet.hotkey.ss58_address,
+        "signature_hex": signature_hex,
+        "nonce": nonce,
+        "timestamp": timestamp,
+    }
