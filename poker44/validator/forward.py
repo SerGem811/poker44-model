@@ -551,20 +551,47 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List[int], List]:
         stagger = validator_uid % len(miner_uids)
         poll_interval = max(1, int(getattr(validator, "poll_interval", 300) or 300))
         subwindow_id = math.floor(time.time() / poll_interval)
-        offset = (
-            (shared_window_id * miners_per_cycle)
-            + (subwindow_id * miners_per_cycle)
-            + stagger
-        ) % len(miner_uids)
-        rotated = list(zip(miner_uids, axons))
-        rotated = rotated[offset:] + rotated[:offset]
-        selected = rotated[:miners_per_cycle]
+        expected_uids = set(getattr(validator, "coverage_round_expected_uids", []) or [])
+        seen_uids = set(getattr(validator, "coverage_round_seen_uids", set()) or set())
+        coverage_round_active = bool(expected_uids) and not bool(
+            getattr(validator, "coverage_round_pending_set_weights", False)
+        )
+
+        pool = list(zip(miner_uids, axons))
+        unseen_pool = [
+            (uid, axon)
+            for uid, axon in pool
+            if uid in expected_uids and uid not in seen_uids
+        ]
+
+        if coverage_round_active and unseen_pool:
+            offset = (
+                (shared_window_id * miners_per_cycle)
+                + (subwindow_id * miners_per_cycle)
+                + stagger
+            ) % len(unseen_pool)
+            rotated = unseen_pool[offset:] + unseen_pool[:offset]
+            selected = rotated[: min(miners_per_cycle, len(rotated))]
+            bt.logging.info(
+                f"Sampling {len(selected)} unseen miners this cycle from {len(unseen_pool)} "
+                f"remaining unseen / {len(pool)} eligible miners "
+                f"(window rotation offset={offset}, validator_stagger={stagger}, subwindow_id={subwindow_id})."
+            )
+        else:
+            offset = (
+                (shared_window_id * miners_per_cycle)
+                + (subwindow_id * miners_per_cycle)
+                + stagger
+            ) % len(miner_uids)
+            rotated = pool[offset:] + pool[:offset]
+            selected = rotated[:miners_per_cycle]
+            bt.logging.info(
+                f"Sampling {miners_per_cycle} miners this cycle from {len(rotated)} eligible miners "
+                f"(window rotation offset={offset}, validator_stagger={stagger}, subwindow_id={subwindow_id})."
+            )
+
         miner_uids = [uid for uid, _ in selected]
         axons = [axon for _, axon in selected]
-        bt.logging.info(
-            f"Sampling {miners_per_cycle} miners this cycle from {len(rotated)} eligible miners "
-            f"(window rotation offset={offset}, validator_stagger={stagger}, subwindow_id={subwindow_id})."
-        )
 
     bt.logging.info(f"Eligible miners this cycle: {miner_uids}")
     return eligible_miner_uids, miner_uids, axons
