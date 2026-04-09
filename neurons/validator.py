@@ -211,11 +211,11 @@ class Validator(BaseValidatorNeuron):
             "version": __version__,
             "deploy_version": VALIDATOR_DEPLOY_VERSION,
             "netuid": self.config.netuid,
-            "poll_interval": self.poll_interval,
-            "reward_window": self.reward_window,
-            "synced_window_mode": self.synced_window_mode,
-            "sync_all_miners": self.sync_all_miners,
-            "sync_direct_score_update": self.sync_direct_score_update,
+            "poll_interval": getattr(self, "poll_interval", None),
+            "reward_window": getattr(self, "reward_window", None),
+            "synced_window_mode": getattr(self, "synced_window_mode", None),
+            "sync_all_miners": getattr(self, "sync_all_miners", None),
+            "sync_direct_score_update": getattr(self, "sync_direct_score_update", None),
             "runtime": self.runtime_info,
         }
         if extra:
