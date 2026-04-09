@@ -313,10 +313,37 @@ class Validator(BaseValidatorNeuron):
         if not self.coverage_round_expected_uids:
             self.begin_coverage_round(normalized_expected, reason=reason)
             return
-        if normalized_expected != self.coverage_round_expected_uids:
-            self.begin_coverage_round(
-                normalized_expected,
-                reason=f"{reason}; eligible set changed",
+        previous_expected = set(self.coverage_round_expected_uids)
+        current_expected = set(normalized_expected)
+        if previous_expected == current_expected:
+            self.coverage_round_expected_uids = normalized_expected
+            return
+
+        added = sorted(current_expected - previous_expected)
+        removed = sorted(previous_expected - current_expected)
+
+        self.coverage_round_expected_uids = normalized_expected
+        self.coverage_round_seen_uids &= current_expected
+        self.coverage_round_reward_sums = {
+            uid: float(self.coverage_round_reward_sums.get(uid, 0.0))
+            for uid in normalized_expected
+        }
+        self.coverage_round_reward_counts = {
+            uid: int(self.coverage_round_reward_counts.get(uid, 0))
+            for uid in normalized_expected
+        }
+
+        bt.logging.info(
+            f"Coverage round #{self.coverage_round_index} reconciled eligible set "
+            f"(+{len(added)} / -{len(removed)}) ({reason})."
+        )
+
+        if current_expected and len(self.coverage_round_seen_uids) >= len(current_expected):
+            self.coverage_round_pending_set_weights = True
+            self.coverage_round_completed_at_step = int(getattr(self, "step", 0))
+            bt.logging.info(
+                f"Coverage round #{self.coverage_round_index} complete after eligible-set reconciliation; "
+                "weights are now eligible to publish."
             )
 
     def record_round_cycle(self, *, sampled_uids: List[int], reward_map: Dict[int, float]) -> None:
