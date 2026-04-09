@@ -245,7 +245,7 @@ class BaseValidatorNeuron(BaseNeuron):
             self.is_running = False
             bt.logging.debug("Stopped")
 
-    def set_weights(self):
+    def set_weights(self) -> bool:
         """
         Sets the validator weights to the metagraph hotkeys based on the scores it has received from the miners. The weights determine the trust and incentive level the validator assigns to miner nodes on the network.
         """
@@ -357,6 +357,7 @@ class BaseValidatorNeuron(BaseNeuron):
                 wait_for_inclusion=wait_for_inclusion,
                 wait_for_finalization=wait_for_finalization,
             )
+        return bool(result)
 
     def _set_weights_commit_reveal_fallback(
         self,
@@ -576,6 +577,47 @@ class BaseValidatorNeuron(BaseNeuron):
             step=self.step,
             scores=self.scores,
             hotkeys=self.hotkeys,
+            coverage_round_index=np.asarray(
+                [int(getattr(self, "coverage_round_index", 0))], dtype=np.int64
+            ),
+            coverage_round_expected_uids=np.asarray(
+                list(getattr(self, "coverage_round_expected_uids", [])), dtype=np.int64
+            ),
+            coverage_round_seen_uids=np.asarray(
+                sorted(getattr(self, "coverage_round_seen_uids", set())), dtype=np.int64
+            ),
+            coverage_round_reward_sum_uids=np.asarray(
+                sorted(getattr(self, "coverage_round_reward_sums", {}).keys()), dtype=np.int64
+            ),
+            coverage_round_reward_sum_values=np.asarray(
+                [
+                    float(getattr(self, "coverage_round_reward_sums", {}).get(uid, 0.0))
+                    for uid in sorted(getattr(self, "coverage_round_reward_sums", {}).keys())
+                ],
+                dtype=np.float32,
+            ),
+            coverage_round_reward_count_uids=np.asarray(
+                sorted(getattr(self, "coverage_round_reward_counts", {}).keys()), dtype=np.int64
+            ),
+            coverage_round_reward_count_values=np.asarray(
+                [
+                    int(getattr(self, "coverage_round_reward_counts", {}).get(uid, 0))
+                    for uid in sorted(getattr(self, "coverage_round_reward_counts", {}).keys())
+                ],
+                dtype=np.int64,
+            ),
+            coverage_round_pending_set_weights=np.asarray(
+                [int(bool(getattr(self, "coverage_round_pending_set_weights", False)))],
+                dtype=np.int64,
+            ),
+            coverage_round_completed_at_step=np.asarray(
+                [
+                    int(getattr(self, "coverage_round_completed_at_step", -1))
+                    if getattr(self, "coverage_round_completed_at_step", None) is not None
+                    else -1
+                ],
+                dtype=np.int64,
+            ),
         )
         write_snapshot = getattr(self, "_write_runtime_snapshot", None)
         if callable(write_snapshot):
@@ -597,3 +639,32 @@ class BaseValidatorNeuron(BaseNeuron):
         self.step = state["step"]
         self.scores = state["scores"]
         self.hotkeys = state["hotkeys"]
+        if "coverage_round_index" in state:
+            self.coverage_round_index = int(state["coverage_round_index"][0])
+            self.coverage_round_expected_uids = [
+                int(uid) for uid in state["coverage_round_expected_uids"].tolist()
+            ]
+            self.coverage_round_seen_uids = {
+                int(uid) for uid in state["coverage_round_seen_uids"].tolist()
+            }
+            self.coverage_round_reward_sums = {
+                int(uid): float(value)
+                for uid, value in zip(
+                    state["coverage_round_reward_sum_uids"].tolist(),
+                    state["coverage_round_reward_sum_values"].tolist(),
+                )
+            }
+            self.coverage_round_reward_counts = {
+                int(uid): int(value)
+                for uid, value in zip(
+                    state["coverage_round_reward_count_uids"].tolist(),
+                    state["coverage_round_reward_count_values"].tolist(),
+                )
+            }
+            self.coverage_round_pending_set_weights = bool(
+                int(state["coverage_round_pending_set_weights"][0])
+            )
+            completed_at_step = int(state["coverage_round_completed_at_step"][0])
+            self.coverage_round_completed_at_step = (
+                completed_at_step if completed_at_step >= 0 else None
+            )

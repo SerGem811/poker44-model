@@ -108,7 +108,20 @@ async def _run_forward_cycle(validator) -> None:
         f"dataset_hash={getattr(validator.provider, 'dataset_hash', '')[:12]}"
     )
     
-    miner_uids, axons = _get_candidate_miners(validator)
+    eligible_miner_uids, miner_uids, axons = _get_candidate_miners(validator)
+    validator.ensure_coverage_round(
+        eligible_miner_uids,
+        reason="forward cycle bootstrap",
+    )
+
+    if getattr(validator, "coverage_round_pending_set_weights", False):
+        bt.logging.info(
+            f"Coverage round #{getattr(validator, 'coverage_round_index', 0)} is complete; "
+            "waiting for the next permitted set_weights window before querying more miners."
+        )
+        await asyncio.sleep(validator.poll_interval)
+        return
+
     responses: Dict[int, List[float]] = {uid: [] for uid in miner_uids}
     cycle_predictions: Dict[int, List[float]] = {uid: [] for uid in miner_uids}
     cycle_labels: Dict[int, List[int]] = {uid: [] for uid in miner_uids}
@@ -288,6 +301,7 @@ async def _run_forward_cycle(validator) -> None:
         rewards_array, metrics = _compute_windowed_rewards(validator, miner_uids)
     reward_map = dict(zip(miner_uids, rewards_array.tolist()))
     metrics_map = {uid: metric for uid, metric in zip(miner_uids, metrics)}
+    validator.record_round_cycle(sampled_uids=miner_uids, reward_map=reward_map)
     bt.logging.info(f"Reward map by UID: {reward_map}")
     bt.logging.info(f"Reward metrics by UID: {metrics_map}")
     winner_uids, winner_rewards = _select_weight_targets(reward_map)
@@ -476,7 +490,7 @@ def _record_compliance(
         )
 
 
-def _get_candidate_miners(validator) -> Tuple[List[int], List]:
+def _get_candidate_miners(validator) -> Tuple[List[int], List[int], List]:
     miner_uids: List[int] = []
     axons: List = []
     target_uids_env = os.getenv("POKER44_TARGET_MINER_UIDS", "").strip()
@@ -522,6 +536,8 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
     miner_uids = [uid for uid, _ in ordered]
     axons = [axon for _, axon in ordered]
 
+    eligible_miner_uids = list(miner_uids)
+
     if getattr(validator, "sync_all_miners", False):
         bt.logging.info("Synchronized validator mode: querying all eligible miners.")
     elif target_uids is None and miners_per_cycle > 0 and len(miner_uids) > miners_per_cycle:
@@ -551,7 +567,7 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
         )
 
     bt.logging.info(f"Eligible miners this cycle: {miner_uids}")
-    return miner_uids, axons
+    return eligible_miner_uids, miner_uids, axons
 
 
 def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndarray, list]:

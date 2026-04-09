@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
+
+import numpy as np
 
 import bittensor as bt
 from dotenv import load_dotenv
@@ -68,6 +70,11 @@ class Validator(BaseValidatorNeuron):
 
     def __init__(self):
         cfg = config(Validator)
+        self.poll_interval = None
+        self.reward_window = None
+        self.synced_window_mode = None
+        self.sync_all_miners = None
+        self.sync_direct_score_update = None
         super().__init__(config=cfg)
         bt.logging.info(f"🚀 Poker44 Validator v{__version__} started")
 
@@ -129,6 +136,13 @@ class Validator(BaseValidatorNeuron):
             False,
         )
         self.current_eval_window_id: Optional[int] = None
+        self.coverage_round_index = 0
+        self.coverage_round_expected_uids: List[int] = []
+        self.coverage_round_seen_uids: set[int] = set()
+        self.coverage_round_reward_sums: Dict[int, float] = {}
+        self.coverage_round_reward_counts: Dict[int, int] = {}
+        self.coverage_round_pending_set_weights = False
+        self.coverage_round_completed_at_step: Optional[int] = None
         self.prediction_buffer = {}
         self.label_buffer = {}
         state_dir = Path(self.config.neuron.full_path)
@@ -216,6 +230,12 @@ class Validator(BaseValidatorNeuron):
             "synced_window_mode": getattr(self, "synced_window_mode", None),
             "sync_all_miners": getattr(self, "sync_all_miners", None),
             "sync_direct_score_update": getattr(self, "sync_direct_score_update", None),
+            "coverage_round_index": getattr(self, "coverage_round_index", None),
+            "coverage_round_expected_count": len(getattr(self, "coverage_round_expected_uids", []) or []),
+            "coverage_round_seen_count": len(getattr(self, "coverage_round_seen_uids", set()) or set()),
+            "coverage_round_pending_set_weights": getattr(
+                self, "coverage_round_pending_set_weights", None
+            ),
             "runtime": self.runtime_info,
         }
         if extra:
@@ -254,6 +274,92 @@ class Validator(BaseValidatorNeuron):
 
     async def forward(self, synapse=None):  # type: ignore[override]
         return await forward_cycle(self)
+
+    def begin_coverage_round(self, expected_uids: List[int], *, reason: str) -> None:
+        ordered_uids = sorted(int(uid) for uid in expected_uids)
+        self.coverage_round_index += 1
+        self.coverage_round_expected_uids = ordered_uids
+        self.coverage_round_seen_uids = set()
+        self.coverage_round_reward_sums = {uid: 0.0 for uid in ordered_uids}
+        self.coverage_round_reward_counts = {uid: 0 for uid in ordered_uids}
+        self.coverage_round_pending_set_weights = False
+        self.coverage_round_completed_at_step = None
+        bt.logging.info(
+            f"Started coverage round #{self.coverage_round_index} with "
+            f"{len(ordered_uids)} eligible miner(s) ({reason})."
+        )
+
+    def ensure_coverage_round(self, expected_uids: List[int], *, reason: str) -> None:
+        normalized_expected = sorted(int(uid) for uid in expected_uids)
+        if not self.coverage_round_expected_uids:
+            self.begin_coverage_round(normalized_expected, reason=reason)
+            return
+        if normalized_expected != self.coverage_round_expected_uids:
+            self.begin_coverage_round(
+                normalized_expected,
+                reason=f"{reason}; eligible set changed",
+            )
+
+    def record_round_cycle(self, *, sampled_uids: List[int], reward_map: Dict[int, float]) -> None:
+        if self.coverage_round_pending_set_weights:
+            return
+
+        for uid in sampled_uids:
+            normalized_uid = int(uid)
+            if normalized_uid not in self.coverage_round_reward_sums:
+                continue
+            self.coverage_round_seen_uids.add(normalized_uid)
+            self.coverage_round_reward_sums[normalized_uid] += float(
+                reward_map.get(normalized_uid, 0.0)
+            )
+            self.coverage_round_reward_counts[normalized_uid] += 1
+
+        seen = len(self.coverage_round_seen_uids)
+        expected = len(self.coverage_round_expected_uids)
+        bt.logging.info(
+            f"Coverage round #{self.coverage_round_index}: seen "
+            f"{seen}/{expected} eligible miner(s)."
+        )
+
+        if expected > 0 and seen >= expected:
+            self.coverage_round_pending_set_weights = True
+            self.coverage_round_completed_at_step = int(getattr(self, "step", 0))
+            bt.logging.info(
+                f"Coverage round #{self.coverage_round_index} complete; "
+                "weights are now eligible to publish."
+            )
+
+    def build_scores_from_coverage_round(self) -> np.ndarray:
+        round_scores = np.zeros(self.metagraph.n, dtype=np.float32)
+        for uid in self.coverage_round_expected_uids:
+            count = int(self.coverage_round_reward_counts.get(uid, 0))
+            if count <= 0:
+                continue
+            avg_reward = float(self.coverage_round_reward_sums.get(uid, 0.0)) / float(count)
+            round_scores[int(uid)] = max(0.0, avg_reward)
+        return round_scores
+
+    def should_set_weights(self) -> bool:  # type: ignore[override]
+        if not self.coverage_round_pending_set_weights:
+            return False
+        return super().should_set_weights()
+
+    def set_weights(self) -> bool:  # type: ignore[override]
+        if not self.coverage_round_pending_set_weights:
+            bt.logging.info(
+                f"Skipping set_weights: coverage round #{self.coverage_round_index} "
+                "has not yet covered all eligible miners."
+            )
+            return False
+
+        self.scores = self.build_scores_from_coverage_round()
+        success = super().set_weights()
+        if success:
+            self.begin_coverage_round(
+                self.coverage_round_expected_uids,
+                reason="previous round published on-chain",
+            )
+        return success
 
     def __del__(self) -> None:
         wandb_helper = getattr(self, "wandb_helper", None)
