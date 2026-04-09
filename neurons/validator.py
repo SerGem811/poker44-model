@@ -75,6 +75,13 @@ class Validator(BaseValidatorNeuron):
         self.synced_window_mode = None
         self.sync_all_miners = None
         self.sync_direct_score_update = None
+        self.coverage_round_index = 0
+        self.coverage_round_expected_uids = []
+        self.coverage_round_seen_uids = set()
+        self.coverage_round_reward_sums = {}
+        self.coverage_round_reward_counts = {}
+        self.coverage_round_pending_set_weights = False
+        self.coverage_round_completed_at_step = None
         super().__init__(config=cfg)
         bt.logging.info(f"🚀 Poker44 Validator v{__version__} started")
 
@@ -136,13 +143,25 @@ class Validator(BaseValidatorNeuron):
             False,
         )
         self.current_eval_window_id: Optional[int] = None
-        self.coverage_round_index = 0
-        self.coverage_round_expected_uids: List[int] = []
-        self.coverage_round_seen_uids: set[int] = set()
-        self.coverage_round_reward_sums: Dict[int, float] = {}
-        self.coverage_round_reward_counts: Dict[int, int] = {}
-        self.coverage_round_pending_set_weights = False
-        self.coverage_round_completed_at_step: Optional[int] = None
+        self.coverage_round_index = int(getattr(self, "coverage_round_index", 0))
+        self.coverage_round_expected_uids: List[int] = list(
+            getattr(self, "coverage_round_expected_uids", [])
+        )
+        self.coverage_round_seen_uids: set[int] = set(
+            getattr(self, "coverage_round_seen_uids", set())
+        )
+        self.coverage_round_reward_sums: Dict[int, float] = dict(
+            getattr(self, "coverage_round_reward_sums", {})
+        )
+        self.coverage_round_reward_counts: Dict[int, int] = dict(
+            getattr(self, "coverage_round_reward_counts", {})
+        )
+        self.coverage_round_pending_set_weights = bool(
+            getattr(self, "coverage_round_pending_set_weights", False)
+        )
+        self.coverage_round_completed_at_step = getattr(
+            self, "coverage_round_completed_at_step", None
+        )
         self.prediction_buffer = {}
         self.label_buffer = {}
         state_dir = Path(self.config.neuron.full_path)
