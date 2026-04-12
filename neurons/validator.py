@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 from poker44 import __version__, VALIDATOR_DEPLOY_VERSION
 from poker44.base.validator import BaseValidatorNeuron
 from poker44.utils.config import config
+from poker44.utils.network_snapshot import collect_network_snapshot
 from poker44.utils.runtime_info import (
     build_signed_runtime_request,
     collect_runtime_info,
@@ -57,6 +58,9 @@ bt.logging(debug=True, trace=False, logging_dir="./logs", record_log=True)
 
 DEFAULT_VALIDATOR_RUNTIME_REPORT_URL = (
     "https://api.poker44.net/internal/validators/runtime"
+)
+DEFAULT_NETWORK_SNAPSHOT_REPORT_URL = (
+    "https://api.poker44.net/internal/network/snapshots"
 )
 
 
@@ -229,6 +233,10 @@ class Validator(BaseValidatorNeuron):
         return Path(self.config.neuron.full_path) / "validator_runtime.json"
 
     @property
+    def network_snapshot_path(self) -> Path:
+        return Path(self.config.neuron.full_path) / "network_snapshot.json"
+
+    @property
     def runtime_info(self) -> dict:
         info = getattr(self, "_runtime_info", None)
         if info is None:
@@ -257,6 +265,7 @@ class Validator(BaseValidatorNeuron):
             ),
             "runtime": self.runtime_info,
         }
+        self.deploy_version = VALIDATOR_DEPLOY_VERSION
         if extra:
             payload.update(extra)
         write_runtime_snapshot(self.runtime_snapshot_path, payload)
@@ -289,6 +298,39 @@ class Validator(BaseValidatorNeuron):
                 bt.logging.warning(
                     "Validator runtime snapshot report failed | "
                     f"url={report_url} message={message}"
+                )
+
+        network_snapshot = collect_network_snapshot(self)
+        write_runtime_snapshot(self.network_snapshot_path, network_snapshot)
+        network_report_url = str(
+            os.getenv(
+                "POKER44_VALIDATOR_NETWORK_SNAPSHOT_REPORT_URL",
+                DEFAULT_NETWORK_SNAPSHOT_REPORT_URL,
+            )
+        ).strip()
+        if network_report_url:
+            timeout_seconds = float(
+                os.getenv("POKER44_VALIDATOR_NETWORK_SNAPSHOT_TIMEOUT_SECONDS", "5")
+            )
+            signed_request = build_signed_runtime_request(
+                wallet=self.wallet,
+                url=network_report_url,
+                payload=network_snapshot,
+            )
+            ok, message = post_runtime_snapshot(
+                url=network_report_url,
+                payload=network_snapshot,
+                timeout_seconds=timeout_seconds,
+                **signed_request,
+            )
+            if ok:
+                bt.logging.debug(
+                    f"Validator network snapshot reported successfully to collector: {network_report_url}"
+                )
+            else:
+                bt.logging.warning(
+                    "Validator network snapshot report failed | "
+                    f"url={network_report_url} message={message}"
                 )
 
     async def forward(self, synapse=None):  # type: ignore[override]

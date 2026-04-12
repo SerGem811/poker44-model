@@ -148,10 +148,11 @@ Startup logs now include:
 The validator also writes a local runtime snapshot to:
 
 - `$(full_path)/validator_runtime.json`
+- `$(full_path)/network_snapshot.json`
 
-That snapshot is updated automatically and includes the current version/deploy metadata, sync mode flags, latest `set_weights` result, and basic score-state counters.
+Those snapshots are updated automatically. The runtime snapshot includes the current version/deploy metadata, sync mode flags, latest `set_weights` result, and basic score-state counters. The network snapshot includes the validator's current metagraph-derived view of Subnet 126 for Poker44 platform dashboards.
 
-By default, the same snapshot is also pushed automatically to Poker44's central collector using a hotkey-signed request. Override `POKER44_VALIDATOR_RUNTIME_REPORT_URL` only if you need to point the validator at a different collector.
+By default, both snapshots are pushed automatically to Poker44's central collector using hotkey-signed requests. Override `POKER44_VALIDATOR_RUNTIME_REPORT_URL` or `POKER44_VALIDATOR_NETWORK_SNAPSHOT_REPORT_URL` only if you need to point the validator at a different collector.
 
 ---
 
