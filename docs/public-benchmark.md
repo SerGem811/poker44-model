@@ -27,15 +27,15 @@ The public benchmark remains a development artifact, not a copy of the live vali
 
 The public benchmark is built only from:
 
-- the public human corpus committed in the repo:
+- the public human dataset committed in the repo:
   `hands_generator/human_hands/poker_hands_combined.json.gz`
-- offline-generated bot chunks derived from the public corpus
+- offline-generated bot chunks derived from the public dataset
 
 It does **not** use:
 
 - live provider-table SQL
 - `/internal/eval/current`
-- validator-private live batches
+- validator live batches
 - central platform eval windows
 
 ## Output

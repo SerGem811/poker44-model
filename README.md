@@ -133,7 +133,7 @@ Recommended manifest fields include:
 - framework
 - license
 - training-data statement
-- private-data attestation
+- data-handling attestation
 
 ---
 

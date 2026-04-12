@@ -14,7 +14,7 @@ PM2_NAME="${PM2_NAME:-poker44_validator}"  ##  name of validator, as you wish
 VALIDATOR_ENV_DIR="${VALIDATOR_ENV_DIR:-validator_env}"
 WALLET_PATH="${WALLET_PATH:-}"
 VALIDATOR_EXTRA_ARGS="${VALIDATOR_EXTRA_ARGS:-}"
-POKER44_HUMAN_JSON_PATH="${POKER44_HUMAN_JSON_PATH:-/path/to/private/poker_data_combined.json}"
+POKER44_HUMAN_JSON_PATH="${POKER44_HUMAN_JSON_PATH:-/path/to/local/poker_data_combined.json}"
 POKER44_RUNTIME_MODE="${POKER44_RUNTIME_MODE:-mixed_dataset}"
 POKER44_CHUNK_COUNT="${POKER44_CHUNK_COUNT:-80}"
 POKER44_REWARD_WINDOW="${POKER44_REWARD_WINDOW:-40}"
@@ -46,7 +46,7 @@ if [ ! -f "$VALIDATOR_SCRIPT" ]; then
 fi
 
 if [ "$POKER44_RUNTIME_MODE" = "mixed_dataset" ] && [ ! -f "$POKER44_HUMAN_JSON_PATH" ]; then
-    echo "Error: Private validator human dataset not found at $POKER44_HUMAN_JSON_PATH"
+    echo "Error: Validator human dataset not found at $POKER44_HUMAN_JSON_PATH"
     echo "Set POKER44_HUMAN_JSON_PATH in scripts/validator/run/run_vali.sh before starting."
     exit 1
 fi

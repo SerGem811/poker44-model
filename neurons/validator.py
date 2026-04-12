@@ -96,7 +96,7 @@ class Validator(BaseValidatorNeuron):
             human_json_env = os.getenv("POKER44_HUMAN_JSON_PATH")
             if not human_json_env:
                 raise RuntimeError(
-                    "POKER44_HUMAN_JSON_PATH must point to the private local human-hand JSON used by validators."
+                    "POKER44_HUMAN_JSON_PATH must point to the local human-hand JSON used by validators."
                 )
 
             human_json_path = Path(human_json_env).expanduser().resolve()

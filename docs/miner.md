@@ -211,7 +211,7 @@ Recommended fields:
 - `license`
 - `training_data_statement`
 - `training_data_sources`
-- `private_data_attestation`
+- `data_attestation`
 - `artifact_url`
 - `artifact_sha256`
 - `implementation_sha256`
@@ -224,7 +224,7 @@ Minimum fields for `transparent` compliance:
 - `model_name`
 - `model_version`
 - `training_data_statement`
-- `private_data_attestation`
+- `data_attestation`
 
 The validator still scores your `risk_scores`; the manifest is for transparency and
 anti-leakage tracking.

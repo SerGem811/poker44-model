@@ -7,8 +7,8 @@ anti-leakage controls, and future compliance-based enforcement.
 
 Poker44 wants miner models to become open source for one core reason:
 
-- reduce the risk that miners are effectively hardcoding or memorizing validator-private
-  human hands instead of learning transferable bot-detection behavior.
+- reduce the risk that miners are effectively hardcoding or memorizing validator-served
+  evaluation hands instead of learning transferable bot-detection behavior.
 
 Open source is not treated as full proof of honesty. It is the first layer of:
 
@@ -34,7 +34,7 @@ At this stage, we are **not** changing this evaluation model.
 
 Main concern:
 
-- a miner could have access to validator-private human data
+- a miner could have access to validator-only evaluation data
 - a miner could overfit, memorize, or hardcode hands/chunks
 - raw scoring alone would not be enough to distinguish genuine generalization from cheating
 
@@ -46,7 +46,7 @@ Therefore:
 The correct positioning is:
 
 - open source provides minimum transparency and traceability
-- private rotating evaluation still protects against simple memorization
+- rotating evaluation still protects against simple memorization
 - future controls will tighten the gap between declared model and executed model
 
 ## What Has Already Been Implemented
@@ -68,7 +68,7 @@ The reference miner now publishes a manifest with:
 - repo metadata
 - model metadata
 - training-data statement
-- private-data attestation
+- data-handling attestation
 - implementation hash
 
 Relevant file:
@@ -132,7 +132,7 @@ Minimum fields required for `transparent` compliance:
 - `model_name`
 - `model_version`
 - `training_data_statement`
-- `private_data_attestation`
+- `data_attestation`
 
 If these are missing, the miner is currently still evaluated and scored normally, but marked
 as `opaque`.
@@ -240,7 +240,7 @@ Correct claim:
 
 Real defense against leakage requires:
 
-- private/live evaluation boundaries
+- validator/live evaluation boundaries
 - rotating live evaluation windows
 - limited repeated exposure
 - future canary chunks / hidden holdouts

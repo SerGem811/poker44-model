@@ -1,7 +1,7 @@
 # Anti-Leakage Policy
 
 This document defines the threat model and initial control policy for preventing miner
-overfitting, memorization, or direct leakage of validator-private human data in Poker44.
+overfitting, memorization, or direct leakage of validator-only evaluation data in Poker44.
 
 ## Threat Model
 
@@ -9,17 +9,17 @@ Poker44 validators now evaluate miners using sanitized batches derived from live
 with humans and bots seated together on the source tables.
 The main failure modes are:
 
-- a miner trains on leaked private or live evaluation data;
+- a miner trains on leaked or repeated evaluation data;
 - a miner memorizes specific hands or chunks instead of learning transferable behavior;
 - a miner hardcodes lookup logic against known evaluation payloads;
 - a miner overfits to public benchmark artifacts and fails to generalize to live validator data.
 
 Open source alone does not eliminate these risks. It improves auditability, but the subnet
-still needs private evaluation discipline and explicit anti-leakage controls.
+still needs strong evaluation discipline and explicit anti-leakage controls.
 
 ## Policy Goals
 
-- keep validator-private human data private;
+- keep validator evaluation inputs non-public;
 - maximize miner generalization to unseen hands and windows;
 - make cheating more detectable and more expensive;
 - create a clear compliance standard for miners without breaking the current evaluation loop.
@@ -38,21 +38,21 @@ Miners should publish a `model_manifest` that includes:
 - framework and license
 - training data statement
 - training data sources
-- private data attestation
+- data-handling attestation
 - artifact hash when a checkpoint exists
 
 This is not proof, but it forces a public claim about how the miner was built.
 
-### 2. Public/Private Dataset Separation
+### 2. Public vs Validator Evaluation Separation
 
 Poker44 should continue to enforce a hard boundary:
 
 - public benchmark for miner training and reference only;
-- validator-private human data for live evaluation only.
+- validator-served evaluation data for live scoring only.
 
 The public benchmark must never be treated as a proxy for production validator data.
 
-### 3. Dynamic Private Evaluation Windows
+### 3. Dynamic Evaluation Windows
 
 Validators should keep evaluating on rotating live windows sourced from platform gameplay rather
 than any static corpus. A miner that memorizes one repeated payload should not be rewarded for
@@ -94,7 +94,7 @@ Use canaries to detect:
 - abrupt performance asymmetries that suggest memorization;
 - repeated exact behavior against synthetic sentinel examples.
 
-Canaries should be rotated and versioned privately.
+Canaries should be rotated and versioned internally.
 
 ### 7. Duplicate and Near-Duplicate Screening
 
@@ -140,7 +140,7 @@ Move from pure remote inference toward artifact-based verification:
 - miner declares model hash;
 - validator downloads artifact;
 - validator runs the declared artifact locally in sandbox;
-- validator scores on private data.
+- validator scores on internal evaluation windows.
 
 This makes the evaluated model much closer to the declared model.
 
@@ -168,7 +168,7 @@ to:
 The correct public claim is:
 
 - open source improves transparency and auditability;
-- private rotating evaluation protects against simple memorization;
+- rotating evaluation protects against simple memorization;
 - future verification layers will tighten the gap between declared and executed models.
 
 The incorrect public claim is:
