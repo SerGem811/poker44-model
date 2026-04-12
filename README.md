@@ -44,6 +44,15 @@ The current production direction is:
 - validators fetch the active canonical batch set through the central eval API;
 - validators send those batches to miners, compute rewards, and set weights.
 
+On top of that, `dev` now also carries the public observability layer needed
+for weekly competition:
+
+- signed validator runtime snapshots;
+- signed metagraph-backed network snapshots;
+- public miners/network dashboard surfaces on `poker44-platform-*`;
+- a weekly competition view built on the canonical eval feed and the latest
+  signed subnet snapshot.
+
 The old local `mixed_dataset` validator path still exists in code, but it is no longer the target
 production operating model.
 
@@ -64,6 +73,13 @@ This means:
 
 - the overall validator request can contain both human-labeled and bot-labeled chunks;
 - but miners are not currently receiving a single mixed multi-hand chunk with one global label.
+
+The competition framing in `dev` should be understood as:
+
+- weekly epoch as the public competition unit;
+- continuous evaluation on canonical live batches during that epoch;
+- public provisional leaderboard derived from the signed subnet snapshot;
+- target settlement model: winner-take-all.
 
 See:
 
