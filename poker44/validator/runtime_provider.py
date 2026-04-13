@@ -60,6 +60,9 @@ class ProviderRuntimeConfig:
     api_base_url: str
     internal_secret: str
     validator_id: str
+    chunk_count: int = 40
+    min_hands_per_chunk: int = 60
+    max_hands_per_chunk: int = 120
     min_eval_hands: int = 40
     max_eval_hands: int = 70
     require_mixed: bool = True
@@ -91,6 +94,9 @@ class ProviderRuntimeConfig:
             api_base_url=api_base_url,
             internal_secret=internal_secret,
             validator_id=validator_id,
+            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "40"))),
+            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))),
+            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))),
             min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "40"))),
             max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "70"))),
             require_mixed=_env_bool("POKER44_PROVIDER_REQUIRE_MIXED", True),
@@ -104,6 +110,9 @@ class ProviderRuntimeConfig:
             "mode": "provider_runtime",
             "api_base_url": self.api_base_url,
             "validator_id": self.validator_id,
+            "chunk_count": self.chunk_count,
+            "min_hands_per_chunk": self.min_hands_per_chunk,
+            "max_hands_per_chunk": self.max_hands_per_chunk,
             "min_eval_hands": self.min_eval_hands,
             "max_eval_hands": self.max_eval_hands,
             "require_mixed": self.require_mixed,
@@ -280,10 +289,9 @@ class ProviderRuntimeDatasetProvider:
                         "/internal/eval/publish-current",
                         payload={
                             "validatorId": self.cfg.validator_id,
-                            "handCount": max(
-                                self.cfg.min_eval_hands,
-                                min(self.cfg.max_eval_hands, limit or self.cfg.max_eval_hands),
-                            ),
+                            "chunkCount": max(1, min(self.cfg.chunk_count, limit or self.cfg.chunk_count)),
+                            "minHandsPerChunk": self.cfg.min_hands_per_chunk,
+                            "maxHandsPerChunk": self.cfg.max_hands_per_chunk,
                             "requireMixed": self.cfg.require_mixed,
                         },
                     )
