@@ -398,9 +398,15 @@ def _record_model_manifest(
 
 
 def _persist_model_manifest_registry(path: str | Path | None, registry: Dict[int, Dict[str, Any]]) -> None:
+    def _uid_sort_key(uid: Any) -> tuple[int, str]:
+        try:
+            return (0, f"{int(uid):010d}")
+        except (TypeError, ValueError):
+            return (1, str(uid))
+
     payload = {
         str(uid): registry[uid]
-        for uid in sorted(registry)
+        for uid in sorted(registry, key=_uid_sort_key)
     }
     persist_json_registry(path, payload)
 

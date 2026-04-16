@@ -73,14 +73,14 @@ class Validator(BaseValidatorNeuron):
         cfg = config(Validator)
         self.poll_interval = None
         self.reward_window = None
+        self.runtime_mode = str(
+            os.getenv("POKER44_RUNTIME_MODE", "provider_runtime")
+        ).strip().lower()
         super().__init__(config=cfg)
         bt.logging.info(f"🚀 Poker44 Validator v{__version__} started")
 
         self.forward_count = 0
         self.settings = cfg
-        self.runtime_mode = str(
-            os.getenv("POKER44_RUNTIME_MODE", "provider_runtime")
-        ).strip().lower()
         refresh_seconds = int(os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60)))
         chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "40"))
         self.chunk_batch_size = chunk_count
@@ -209,7 +209,7 @@ class Validator(BaseValidatorNeuron):
             "version": __version__,
             "deploy_version": VALIDATOR_DEPLOY_VERSION,
             "netuid": self.config.netuid,
-            "runtime_mode": self.runtime_mode,
+            "runtime_mode": getattr(self, "runtime_mode", "initializing"),
             "poll_interval": getattr(self, "poll_interval", None),
             "reward_window": getattr(self, "reward_window", None),
             "chunk_batch_size": getattr(self, "chunk_batch_size", None),
