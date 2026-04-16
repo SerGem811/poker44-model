@@ -41,12 +41,15 @@ class ValidatorRuntimeSmokeGuardTests(unittest.TestCase):
             dummy.runtime_snapshot_path = Path(tmpdir) / "validator_runtime.json"
 
             with patch("neurons.validator.write_runtime_snapshot") as write_snapshot, patch(
+                "neurons.validator.collect_network_snapshot",
+                return_value={"network": "ok"},
+            ), patch(
                 "neurons.validator.build_signed_runtime_request",
                 return_value={},
             ), patch("neurons.validator.post_runtime_snapshot", return_value=(False, "skipped")):
                 Validator._write_runtime_snapshot(dummy, status="initializing")
 
-            payload = write_snapshot.call_args.args[1]
+            payload = write_snapshot.call_args_list[0].args[1]
             self.assertEqual(payload["runtime_mode"], "initializing")
             self.assertEqual(payload["validator_uid"], 74)
 
