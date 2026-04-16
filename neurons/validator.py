@@ -71,8 +71,10 @@ class Validator(BaseValidatorNeuron):
 
     def __init__(self):
         cfg = config(Validator)
-        self.poll_interval = None
-        self.reward_window = None
+        self.poll_interval = int(
+            os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(getattr(cfg, "poll_interval_seconds", 300)))
+        )
+        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
         self.runtime_mode = str(
             os.getenv("POKER44_RUNTIME_MODE", "provider_runtime")
         ).strip().lower()
@@ -134,7 +136,7 @@ class Validator(BaseValidatorNeuron):
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )
-        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
+        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", str(self.reward_window)))
         self.prediction_buffer = {}
         self.label_buffer = {}
         self.coverage_buffer = {}
@@ -327,12 +329,18 @@ class Validator(BaseValidatorNeuron):
             )
             return
 
-        report_url = str(
-            os.getenv(
-                "POKER44_COMPETITION_SCORE_REPORT_URL",
-                DEFAULT_COMPETITION_SCORE_REPORT_URL,
-            )
-        ).strip()
+        report_url = str(os.getenv("POKER44_COMPETITION_SCORE_REPORT_URL", "")).strip()
+        if not report_url and self.runtime_mode == "provider_runtime":
+            api_base_url = str(
+                os.getenv(
+                    "POKER44_EVAL_API_BASE_URL",
+                    os.getenv("POKER44_PROVIDER_API_BASE_URL", ""),
+                )
+            ).strip().rstrip("/")
+            if api_base_url:
+                report_url = f"{api_base_url}/internal/competition/report-scores"
+        if not report_url:
+            report_url = DEFAULT_COMPETITION_SCORE_REPORT_URL
         if not report_url:
             return
 
