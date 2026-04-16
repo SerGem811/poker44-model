@@ -25,7 +25,7 @@ BACKEND_PORT="${POKER44_PROVIDER_BACKEND_PORT:-4001}"
 FRONTEND_PORT="${POKER44_PROVIDER_FRONTEND_PORT:-4000}"
 DATABASE_URL="${POKER44_PROVIDER_DATABASE_URL:-postgresql://aceguard:aceguard_local_pwd@localhost:5433/aceguard_poker}"
 REDIS_URL="${POKER44_PROVIDER_REDIS_URL:-redis://localhost:6379}"
-INTERNAL_EVAL_SECRET="${POKER44_PROVIDER_INTERNAL_SECRET:-force-start-secret}"
+INTERNAL_EVAL_SECRET="${POKER44_PROVIDER_INTERNAL_SECRET:-}"
 EVAL_COORDINATOR_BASE_URL="${POKER44_EVAL_COORDINATOR_BASE_URL:-http://185.196.20.208:4010}"
 PROVIDER_PUBLIC_HOST="${POKER44_PROVIDER_PUBLIC_HOST:-}"
 PROVIDER_PUBLIC_BASE_URL="${POKER44_PROVIDER_PUBLIC_BASE_URL:-}"
@@ -50,6 +50,11 @@ MAX_EVAL_HANDS="${POKER44_PROVIDER_MAX_EVAL_HANDS:-120}"
 log() {
   echo "[provider-bootstrap] $*"
 }
+
+if [ -z "$INTERNAL_EVAL_SECRET" ] || [ "$INTERNAL_EVAL_SECRET" = "force-start-secret" ]; then
+  echo "POKER44_PROVIDER_INTERNAL_SECRET must be set to a real shared secret before bootstrapping the provider runtime." >&2
+  exit 1
+fi
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then

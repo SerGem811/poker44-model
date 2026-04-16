@@ -241,7 +241,7 @@ Example:
 WALLET_NAME=p44_cold \
 HOTKEY=p44_validator \
 POKER44_RUNTIME_MODE=provider_runtime \
-POKER44_PROVIDER_INTERNAL_SECRET=force-start-secret \
+POKER44_PROVIDER_INTERNAL_SECRET=replace-with-real-shared-secret \
 POKER44_EVAL_API_BASE_URL=http://185.196.20.208:4001 \
 ./scripts/validator/run/run_vali.sh
 ```

@@ -93,7 +93,7 @@ async def _run_forward_cycle(validator) -> None:
                 dataset_stats=getattr(validator.provider, "stats", {}),
                 extra={"forward/status": "no_eligible_miners"},
             )
-        _finalize_provider_cycle(validator)
+        _finalize_provider_cycle(validator, evaluation_completed=False)
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -272,7 +272,7 @@ async def _run_forward_cycle(validator) -> None:
                     "forward/bot_chunk_count": sum(1 for label in batch_labels if label == 1),
                 },
             )
-        _finalize_provider_cycle(validator)
+        _finalize_provider_cycle(validator, evaluation_completed=False)
         await asyncio.sleep(validator.poll_interval)
         return
     
@@ -320,14 +320,19 @@ async def _run_forward_cycle(validator) -> None:
             winner_rewards=[float(weight) for weight in winner_rewards],
         )
     bt.logging.info(f"Rewards issued for {len(winner_rewards)} UID(s).")
-    _finalize_provider_cycle(validator)
+    _finalize_provider_cycle(validator, evaluation_completed=True)
     bt.logging.info(
         f"[Forward #{validator.forward_count}] complete. Sleeping {validator.poll_interval}s before next tick.",
     )
     await asyncio.sleep(validator.poll_interval)
 
 
-def _finalize_provider_cycle(validator) -> None:
+def _finalize_provider_cycle(validator, *, evaluation_completed: bool) -> None:
+    if not evaluation_completed:
+        bt.logging.info(
+            "Skipping provider-runtime finalization because the cycle did not produce usable evaluation results."
+        )
+        return
     mark_evaluated = getattr(validator.provider, "mark_last_batch_evaluated", None)
     if not callable(mark_evaluated):
         return

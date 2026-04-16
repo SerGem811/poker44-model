@@ -17,6 +17,12 @@ import bittensor as bt
 from poker44.core.models import LabeledHandBatch
 
 
+_INVALID_INTERNAL_SECRETS = {
+    "",
+    "force-start-secret",
+}
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = str(os.getenv(name, str(default))).strip().lower()
     return raw in {"1", "true", "yes", "on"}
@@ -81,9 +87,10 @@ class ProviderRuntimeConfig:
             )
         api_base_url = _normalize_base_url(api_base_url_raw)
         internal_secret = str(os.getenv("POKER44_PROVIDER_INTERNAL_SECRET", "")).strip()
-        if not internal_secret:
+        if internal_secret in _INVALID_INTERNAL_SECRETS:
             raise RuntimeError(
-                "POKER44_PROVIDER_INTERNAL_SECRET is required when POKER44_RUNTIME_MODE=provider_runtime."
+                "POKER44_PROVIDER_INTERNAL_SECRET is required when "
+                "POKER44_RUNTIME_MODE=provider_runtime and must be set to a real shared secret."
             )
 
         validator_id = (
