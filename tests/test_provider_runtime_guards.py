@@ -46,6 +46,7 @@ class ProviderRuntimeGuardTests(unittest.TestCase):
         self.assertEqual(cfg.api_base_url, "http://127.0.0.1:3001")
         self.assertEqual(cfg.internal_secret, "real-secret-value")
         self.assertEqual(cfg.validator_id, "validator_hotkey")
+        self.assertEqual(cfg.request_timeout_seconds, 60)
 
     def test_provider_cycle_finalization_requires_completed_evaluation(self):
         validator = _DummyValidator()

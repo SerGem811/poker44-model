@@ -74,7 +74,7 @@ class ProviderRuntimeConfig:
     require_mixed: bool = True
     attempt_publish_current: bool = True
     mark_evaluated: bool = True
-    request_timeout_seconds: int = 15
+    request_timeout_seconds: int = 60
 
     @classmethod
     def from_env(cls, *, default_validator_id: str) -> "ProviderRuntimeConfig":
@@ -109,7 +109,7 @@ class ProviderRuntimeConfig:
             require_mixed=_env_bool("POKER44_PROVIDER_REQUIRE_MIXED", True),
             attempt_publish_current=_env_bool("POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT", True),
             mark_evaluated=_env_bool("POKER44_PROVIDER_MARK_EVALUATED", True),
-            request_timeout_seconds=int(os.getenv("POKER44_PROVIDER_REQUEST_TIMEOUT_SECONDS", "15")),
+            request_timeout_seconds=int(os.getenv("POKER44_PROVIDER_REQUEST_TIMEOUT_SECONDS", "60")),
         )
 
     def public_summary(self) -> Dict[str, Any]:
