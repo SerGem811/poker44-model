@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 import bittensor as bt
 
 from poker44.core.models import LabeledHandBatch
+from poker44.utils.runtime_info import build_signed_runtime_request
 
 
 _INVALID_INTERNAL_SECRETS = {
@@ -87,10 +88,9 @@ class ProviderRuntimeConfig:
             )
         api_base_url = _normalize_base_url(api_base_url_raw)
         internal_secret = str(os.getenv("POKER44_PROVIDER_INTERNAL_SECRET", "")).strip()
-        if internal_secret in _INVALID_INTERNAL_SECRETS:
+        if internal_secret == "force-start-secret":
             raise RuntimeError(
-                "POKER44_PROVIDER_INTERNAL_SECRET is required when "
-                "POKER44_RUNTIME_MODE=provider_runtime and must be set to a real shared secret."
+                "POKER44_PROVIDER_INTERNAL_SECRET cannot use the placeholder value force-start-secret."
             )
 
         validator_id = (
@@ -125,13 +125,16 @@ class ProviderRuntimeConfig:
             "require_mixed": self.require_mixed,
             "attempt_publish_current": self.attempt_publish_current,
             "mark_evaluated": self.mark_evaluated,
+            "uses_signed_eval_auth": True,
+            "admin_eval_secret_configured": bool(self.internal_secret),
             **_current_competition_epoch(),
         }
 
 
 class _EvalApiClient:
-    def __init__(self, cfg: ProviderRuntimeConfig):
+    def __init__(self, cfg: ProviderRuntimeConfig, *, wallet: Any | None = None):
         self.cfg = cfg
+        self.wallet = wallet
 
     def _request(
         self,
@@ -140,6 +143,7 @@ class _EvalApiClient:
         *,
         query: Optional[Mapping[str, Any]] = None,
         payload: Optional[Mapping[str, Any]] = None,
+        auth_mode: str = "validator",
     ) -> Any:
         url = f"{self.cfg.api_base_url}{path}"
         if query:
@@ -147,12 +151,42 @@ class _EvalApiClient:
 
         headers = {
             "accept": "application/json",
-            "x-eval-secret": self.cfg.internal_secret,
         }
         body_bytes = None
         if payload is not None:
             body_bytes = json.dumps(payload).encode("utf-8")
             headers["content-type"] = "application/json"
+        else:
+            body_bytes = json.dumps({}).encode("utf-8")
+
+        if auth_mode == "admin":
+            if self.cfg.internal_secret in _INVALID_INTERNAL_SECRETS:
+                raise RuntimeError(
+                    "Admin eval route requires POKER44_PROVIDER_INTERNAL_SECRET."
+                )
+            headers["x-eval-secret"] = self.cfg.internal_secret
+        else:
+            if self.wallet is not None:
+                signed = build_signed_runtime_request(
+                    wallet=self.wallet,
+                    url=url,
+                    payload=payload or {},
+                    method=method.upper(),
+                )
+                headers.update(
+                    {
+                        "x-validator-hotkey": signed["hotkey_ss58"],
+                        "x-validator-signature": signed["signature_hex"],
+                        "x-validator-nonce": signed["nonce"],
+                        "x-validator-timestamp": str(signed["timestamp"]),
+                    }
+                )
+            elif self.cfg.internal_secret not in _INVALID_INTERNAL_SECRETS:
+                headers["x-eval-secret"] = self.cfg.internal_secret
+            else:
+                raise RuntimeError(
+                    "Validator eval route requires a wallet signature or an admin secret fallback."
+                )
 
         request = Request(url, data=body_bytes, headers=headers, method=method.upper())
         with urlopen(request, timeout=self.cfg.request_timeout_seconds) as response:
@@ -163,19 +197,31 @@ class _EvalApiClient:
             return decoded["data"]
         return decoded
 
-    def get(self, path: str, *, query: Optional[Mapping[str, Any]] = None) -> Any:
-        return self._request("GET", path, query=query)
+    def get(
+        self,
+        path: str,
+        *,
+        query: Optional[Mapping[str, Any]] = None,
+        auth_mode: str = "validator",
+    ) -> Any:
+        return self._request("GET", path, query=query, auth_mode=auth_mode)
 
-    def post(self, path: str, *, payload: Optional[Mapping[str, Any]] = None) -> Any:
-        return self._request("POST", path, payload=payload)
+    def post(
+        self,
+        path: str,
+        *,
+        payload: Optional[Mapping[str, Any]] = None,
+        auth_mode: str = "validator",
+    ) -> Any:
+        return self._request("POST", path, payload=payload, auth_mode=auth_mode)
 
 
 class ProviderRuntimeManager:
     """Health-checks and metadata for the central eval API."""
 
-    def __init__(self, cfg: ProviderRuntimeConfig):
+    def __init__(self, cfg: ProviderRuntimeConfig, *, wallet: Any | None = None):
         self.cfg = cfg
-        self.client = _EvalApiClient(cfg)
+        self.client = _EvalApiClient(cfg, wallet=wallet)
         self.status: Dict[str, Any] = {
             "runtime_ready": False,
             "last_error": "",
@@ -207,9 +253,9 @@ class ProviderRuntimeManager:
 class ProviderRuntimeDatasetProvider:
     """Consumes central labeled eval batches from platform-backend."""
 
-    def __init__(self, cfg: ProviderRuntimeConfig):
+    def __init__(self, cfg: ProviderRuntimeConfig, *, wallet: Any | None = None):
         self.cfg = cfg
-        self.manager = ProviderRuntimeManager(cfg)
+        self.manager = ProviderRuntimeManager(cfg, wallet=wallet)
         self._dataset_hash: str = ""
         self._stats: Dict[str, Any] = cfg.public_summary()
         self._pending_hand_ids: List[str] = []
@@ -290,7 +336,7 @@ class ProviderRuntimeDatasetProvider:
             return []
 
         try:
-            if self.cfg.attempt_publish_current:
+            if self.cfg.attempt_publish_current and self.cfg.internal_secret not in _INVALID_INTERNAL_SECRETS:
                 try:
                     publish_result = self.manager.client.post(
                         "/internal/eval/publish-current",
@@ -301,6 +347,7 @@ class ProviderRuntimeDatasetProvider:
                             "maxHandsPerChunk": self.cfg.max_hands_per_chunk,
                             "requireMixed": self.cfg.require_mixed,
                         },
+                        auth_mode="admin",
                     )
                     if isinstance(publish_result, dict):
                         self._stats.update(

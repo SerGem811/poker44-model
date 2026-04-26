@@ -92,7 +92,10 @@ class Validator(BaseValidatorNeuron):
                 default_validator_id=self.wallet.hotkey.ss58_address
             )
             self.dataset_cfg = provider_runtime_cfg.public_summary()
-            self.provider = ProviderRuntimeDatasetProvider(provider_runtime_cfg)
+            self.provider = ProviderRuntimeDatasetProvider(
+                provider_runtime_cfg,
+                wallet=self.wallet,
+            )
             bt.logging.info(
                 "🎯 Using provider runtime dataset provider | "
                 f"api={provider_runtime_cfg.api_base_url} "

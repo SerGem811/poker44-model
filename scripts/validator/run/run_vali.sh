@@ -51,19 +51,19 @@ if [ "$POKER44_RUNTIME_MODE" = "mixed_dataset" ] && [ ! -f "$POKER44_HUMAN_JSON_
     exit 1
 fi
 
-if [ "$POKER44_RUNTIME_MODE" = "provider_runtime" ] && [ -z "$POKER44_PROVIDER_INTERNAL_SECRET" ]; then
-    echo "Error: POKER44_PROVIDER_INTERNAL_SECRET is required in provider_runtime mode."
-    exit 1
-fi
-
 if [ "$POKER44_RUNTIME_MODE" = "provider_runtime" ] && [ "$POKER44_PROVIDER_INTERNAL_SECRET" = "force-start-secret" ]; then
-    echo "Error: POKER44_PROVIDER_INTERNAL_SECRET must be set to a real shared secret in provider_runtime mode."
+    echo "Error: POKER44_PROVIDER_INTERNAL_SECRET cannot be set to the placeholder force-start-secret."
     exit 1
 fi
 
 if [ "$POKER44_RUNTIME_MODE" = "provider_runtime" ] && [ -z "$POKER44_EVAL_API_BASE_URL" ]; then
     echo "Error: POKER44_EVAL_API_BASE_URL is required in provider_runtime mode."
     exit 1
+fi
+
+if [ "$POKER44_RUNTIME_MODE" = "provider_runtime" ] && [ -z "$POKER44_PROVIDER_INTERNAL_SECRET" ]; then
+    echo "Warning: POKER44_PROVIDER_INTERNAL_SECRET is unset; validator-facing eval calls will use signed hotkey auth only."
+    echo "Warning: admin eval actions such as publish-current will be skipped unless the backend auto-publishes the active chunk."
 fi
 
 if ! command -v pm2 &> /dev/null; then

@@ -95,13 +95,17 @@ def build_signed_runtime_request(
     wallet: Any,
     url: str,
     payload: Mapping[str, Any],
+    method: str = "POST",
 ) -> dict[str, Any]:
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
-    path = urlparse(url).path or "/"
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
     nonce = secrets.token_hex(16)
     timestamp = int(time.time())
     body_hash = sha256(encoded).hexdigest()
-    message = f"{timestamp}:{nonce}:POST:{path}:{body_hash}"
+    message = f"{timestamp}:{nonce}:{method.upper()}:{path}:{body_hash}"
     signature_hex = wallet.hotkey.sign(message.encode()).hex()
     return {
         "hotkey_ss58": wallet.hotkey.ss58_address,
