@@ -156,7 +156,7 @@ class _EvalApiClient:
         if payload is not None:
             body_bytes = json.dumps(payload).encode("utf-8")
             headers["content-type"] = "application/json"
-        else:
+        elif method.upper() not in {"GET", "HEAD"}:
             body_bytes = json.dumps({}).encode("utf-8")
 
         if auth_mode == "admin":
@@ -170,7 +170,7 @@ class _EvalApiClient:
                 signed = build_signed_runtime_request(
                     wallet=self.wallet,
                     url=url,
-                    payload=payload or {},
+                    payload=payload,
                     method=method.upper(),
                 )
                 headers.update(
