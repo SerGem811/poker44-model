@@ -154,7 +154,7 @@ class _EvalApiClient:
         }
         body_bytes = None
         if payload is not None:
-            body_bytes = json.dumps(payload).encode("utf-8")
+            body_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
             headers["content-type"] = "application/json"
         elif method.upper() not in {"GET", "HEAD"}:
             body_bytes = json.dumps({}).encode("utf-8")
