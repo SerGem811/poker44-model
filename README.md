@@ -45,12 +45,12 @@ The current production direction is:
 - validators send those batches to miners, compute rewards, and set weights.
 
 On top of that, `dev` now also carries the public observability layer needed
-for weekly competition:
+for daily competition:
 
 - signed validator runtime snapshots;
 - signed metagraph-backed network snapshots;
 - public miners/network dashboard surfaces on `poker44-platform-*`;
-- a weekly competition view built on the canonical eval feed and the latest
+- a daily competition view built on the canonical eval feed and the latest
   signed subnet snapshot.
 
 The old local `mixed_dataset` validator path still exists in code, but it is no longer the target
@@ -77,13 +77,13 @@ This means:
 
 The competition framing in `dev` should be understood as:
 
-- weekly epoch as the public competition unit;
+- daily epoch as the public competition unit;
 - continuous evaluation on canonical live batches during that epoch;
 - public provisional leaderboard derived from the signed subnet snapshot;
 - target settlement model: winner-take-all.
 
 In the current `dev` runtime, validators read the canonical competition weight
-vector from the backend. Once the backend has settled at least one weekly
+vector from the backend. Once the backend has settled at least one daily
 winner, that latest settled winner becomes the active on-chain competitive
 allocation for the current period: `97%` is burned to `uid 0`, and the
 remaining `3%` follows the backend-provided winner vector. Before the first

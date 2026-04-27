@@ -23,8 +23,8 @@ class CompetitionWeightResolutionTests(unittest.TestCase):
             provider=_Provider(
                 {
                     "status": "settled",
-                    "epochId": "week_2026-04-20_2000utc",
-                    "sourceEpochId": "week_2026-04-13_2000utc",
+                    "epochId": "day_2026-04-20_2000utc",
+                    "sourceEpochId": "day_2026-04-19_2000utc",
                     "winnerUid": 42,
                     "weights": [{"uid": 42, "weight": 1}],
                 }
@@ -45,7 +45,7 @@ class CompetitionWeightResolutionTests(unittest.TestCase):
             provider=_Provider(
                 {
                     "status": "fallback",
-                    "epochId": "week_2026-04-20_2000utc",
+                    "epochId": "day_2026-04-20_2000utc",
                     "sourceEpochId": None,
                     "winnerUid": 0,
                     "weights": [{"uid": 0, "weight": 1}],
@@ -65,8 +65,8 @@ class CompetitionWeightResolutionTests(unittest.TestCase):
             provider=_Provider(
                 {
                     "status": "runtime",
-                    "epochId": "week_2026-04-20_2000utc",
-                    "sourceEpochId": "week_2026-04-13_2000utc",
+                    "epochId": "day_2026-04-20_2000utc",
+                    "sourceEpochId": "day_2026-04-19_2000utc",
                     "winnerUid": None,
                     "weights": [
                         {"uid": 7, "weight": 2},
@@ -89,8 +89,8 @@ class CompetitionWeightResolutionTests(unittest.TestCase):
             provider=_Provider(
                 {
                     "status": "settled",
-                    "epochId": "week_2026-04-20_2000utc",
-                    "sourceEpochId": "week_2026-04-13_2000utc",
+                    "epochId": "day_2026-04-20_2000utc",
+                    "sourceEpochId": "day_2026-04-19_2000utc",
                     "winnerUid": 42,
                     "weights": [{"uid": 42, "weight": 0}],
                 }

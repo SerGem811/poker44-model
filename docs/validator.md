@@ -100,25 +100,25 @@ platform can expose:
 
 - validator runtime alignment;
 - live network/miner state from validator-signed metagraph snapshots;
-- a weekly competition surface built on top of the canonical eval feed.
+- a daily competition surface built on top of the canonical eval feed.
 
 The intended competition model is:
 
-- weekly epoch (Monday 20:00 UTC to Monday 20:00 UTC);
-- canonical eval windows of 2 hours inside that weekly epoch;
+- daily epoch (20:00 UTC to 20:00 UTC);
+- canonical eval windows of 2 hours inside that daily epoch;
 - continuous evaluation on canonical live hands during the epoch;
-- public provisional leaderboard during the week;
+- public provisional leaderboard during the day;
 - winner-take-all settlement after the epoch closes.
 
 Settlement behavior in `dev` now follows a platform-decided pattern:
 
 - validators fetch the canonical competition vector from
   `/internal/competition/current/weights`;
-- once the backend has settled at least one weekly winner, the latest settled
+- once the backend has settled at least one daily winner, the latest settled
   winner becomes the canonical competition vector for the current/vigente
   period, but validators apply a Swarm-style burn on top of it:
   `97%` to `uid 0`, `3%` to the backend-provided winner vector;
-- before the first weekly settlement exists, the backend returns its explicit
+- before the first daily settlement exists, the backend returns its explicit
   fallback vector (typically `uid 0`, which remains `100%` burned);
 - validators only fall back to local score-based weights if the backend is
   unavailable or returns no usable positive vector.

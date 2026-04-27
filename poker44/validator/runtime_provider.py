@@ -40,7 +40,6 @@ def _compute_batches_hash(batches: Sequence[Mapping[str, Any]]) -> str:
 
 def _current_competition_epoch(now: Optional[datetime] = None) -> Dict[str, Any]:
     current = now or datetime.now(timezone.utc)
-    days_since_monday = current.weekday()
     start = datetime(
         current.year,
         current.month,
@@ -49,12 +48,12 @@ def _current_competition_epoch(now: Optional[datetime] = None) -> Dict[str, Any]
         0,
         0,
         tzinfo=timezone.utc,
-    ) - timedelta(days=days_since_monday)
+    )
     if current < start:
-        start -= timedelta(days=7)
-    end = start + timedelta(days=7)
+        start -= timedelta(days=1)
+    end = start + timedelta(days=1)
     return {
-        "competition_epoch_id": f"week_{start.date().isoformat()}_2000utc",
+        "competition_epoch_id": f"day_{start.date().isoformat()}_2000utc",
         "competition_epoch_start": start.isoformat(),
         "competition_epoch_end": end.isoformat(),
         "competition_settlement_mode": "winner_take_all",
