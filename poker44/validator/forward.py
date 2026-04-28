@@ -567,6 +567,9 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
         )
 
         if len(pred_buf) < window or len(label_buf) < window:
+            current_sample_count = int(
+                min(len(pred_buf), len(label_buf), max(0, window))
+            )
             rewards.append(0.0)
             metrics.append(
                 {
@@ -578,7 +581,7 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
                     "reward": 0.0,
                     "coverage_rate": coverage_rate,
                     "latency_mean_seconds": latency_mean_seconds,
-                    "sample_count": min(len(pred_buf), len(label_buf)),
+                    "sample_count": current_sample_count,
                 }
             )
             continue
@@ -588,7 +591,7 @@ def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndar
         rew, metric = reward(preds_window, labels_window)
         metric["coverage_rate"] = coverage_rate
         metric["latency_mean_seconds"] = latency_mean_seconds
-        metric["sample_count"] = int(min(len(pred_buf), len(label_buf)))
+        metric["sample_count"] = int(len(labels_window))
         rewards.append(rew)
         metrics.append(metric)
 
