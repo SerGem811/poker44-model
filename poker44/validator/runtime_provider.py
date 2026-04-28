@@ -23,6 +23,8 @@ _INVALID_INTERNAL_SECRETS = {
     "force-start-secret",
 }
 
+_DEFAULT_EVAL_API_BASE_URL = "https://api.poker44.net"
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = str(os.getenv(name, str(default))).strip().lower()
@@ -79,12 +81,11 @@ class ProviderRuntimeConfig:
     @classmethod
     def from_env(cls, *, default_validator_id: str) -> "ProviderRuntimeConfig":
         api_base_url_raw = str(
-            os.getenv("POKER44_EVAL_API_BASE_URL", os.getenv("POKER44_PROVIDER_API_BASE_URL", ""))
-        ).strip()
-        if not api_base_url_raw:
-            raise RuntimeError(
-                "POKER44_EVAL_API_BASE_URL is required when POKER44_RUNTIME_MODE=provider_runtime."
+            os.getenv(
+                "POKER44_EVAL_API_BASE_URL",
+                os.getenv("POKER44_PROVIDER_API_BASE_URL", _DEFAULT_EVAL_API_BASE_URL),
             )
+        ).strip()
         api_base_url = _normalize_base_url(api_base_url_raw)
         internal_secret = str(os.getenv("POKER44_PROVIDER_INTERNAL_SECRET", "")).strip()
         if internal_secret == "force-start-secret":

@@ -20,6 +20,18 @@ class _DummyValidator:
 
 
 class ProviderRuntimeGuardTests(unittest.TestCase):
+    def test_defaults_to_public_eval_api_base_url(self):
+        with patch.dict(
+            os.environ,
+            {},
+            clear=True,
+        ):
+            cfg = ProviderRuntimeConfig.from_env(default_validator_id="validator_hotkey")
+
+        self.assertEqual(cfg.api_base_url, "https://api.poker44.net")
+        self.assertEqual(cfg.internal_secret, "")
+        self.assertEqual(cfg.validator_id, "validator_hotkey")
+
     def test_rejects_placeholder_internal_secret(self):
         with patch.dict(
             os.environ,

@@ -214,8 +214,11 @@ Mandatory for production:
 - `POKER44_RUNTIME_MODE=provider_runtime`
 - `WALLET_NAME`
 - `HOTKEY`
-- `POKER44_EVAL_API_BASE_URL`
 - `POKER44_PROVIDER_INTERNAL_SECRET`
+
+Defaulted for production:
+
+- `POKER44_EVAL_API_BASE_URL=https://api.poker44.net`
 
 Optional observability/reporting:
 
