@@ -48,7 +48,7 @@ class Miner(BaseMinerNeuron):
                 ),
                 "training_data_sources": ["none"],
                 "private_data_attestation": (
-                    "This reference miner does not train on validator-private human data."
+                    "This reference miner does not train on validator-only evaluation data."
                 ),
             },
         )

@@ -193,7 +193,7 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             "game_type": str(metadata.get("game_type", "")),
             "limit_type": str(metadata.get("limit_type", "")),
             "max_seats": max_seats,
-            "hero_seat": 0,
+            "hero_seat": _sanitize_seat(metadata.get("hero_seat"), max_seats=max_seats),
             "hand_ended_on_street": "",
             "button_seat": 0,
             "sb": _SANITIZED_SB,
@@ -220,6 +220,14 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             "showdown": False,
         },
     }
+
+
+def prepare_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Preserve already-sanitized eval payloads, otherwise sanitize canonical hands."""
+    schema = str(hand_payload.get("schema") or "").strip().lower()
+    if schema.startswith("poker44_eval_hand_v"):
+        return strip_leakage_fields(hand_payload)
+    return sanitize_hand_for_miner(hand_payload)
 
 
 def sanitized_chunk_signature(

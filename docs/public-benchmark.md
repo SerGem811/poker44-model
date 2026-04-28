@@ -1,36 +1,49 @@
 # Public Benchmark and W&B
 
-This document describes the public benchmark flow intended for miner training/reference use.
+This document describes the public benchmark flow intended for miner training and offline reference.
 
 ## Purpose
 
 The public benchmark exists to give miners:
 
-- a reproducible labeled dataset for local training and offline evaluation;
-- a schema aligned with the sanitized validator payloads miners receive at inference time;
-- an artifact that can be published to Weights & Biases (W&B) without exposing validator-private evaluation data.
+- a reproducible labeled dataset for local experimentation;
+- a schema aligned with the sanitized validator payloads miners see today;
+- an artifact that can be published to Weights & Biases without exposing live evaluation data.
 
-## Data Boundary
+## Important Boundary
+
+The public benchmark is **not** the same thing as production validator evaluation.
+
+Production validators now evaluate miners using:
+
+- live hands generated on Poker44 benchmark tables;
+- centralized SQL persistence;
+- sanitizer-built batches exposed by the central eval API;
+- unseen batches delivered through the validator runtime.
+
+The public benchmark remains a development artifact, not a copy of the live validator stream.
+
+## Current Public Benchmark Inputs
 
 The public benchmark is built only from:
 
-- the public human corpus committed in the repo:
+- the public human dataset committed in the repo:
   `hands_generator/human_hands/poker_hands_combined.json.gz`
-- offline-generated bot chunks derived from the public corpus
+- offline-generated bot chunks derived from the public dataset
 
 It does **not** use:
 
-- `POKER44_HUMAN_JSON_PATH`
-- validator-private human datasets
-- `data/validator_mixed_chunks.json`
-- live validator batches sent to miners
+- live provider-table SQL
+- `/internal/eval/current`
+- validator live batches
+- central platform eval windows
 
 ## Output
 
 The benchmark builder produces a labeled dataset with:
 
-- `train` / `validation` split per chunk
-- `is_bot` ground-truth label per chunk
+- `train` / `validation` split
+- ground-truth labels
 - sanitized hands matching the miner-visible schema
 - aggregate dataset statistics
 - dataset hash for versioning
@@ -77,20 +90,25 @@ The publish script logs:
 
 - the benchmark artifact file
 - dataset hash
-- chunk counts and split counts
-- shortcut-rule accuracy
+- split counts
 - aggregate benchmark metadata
 
-It does not publish validator-private human data or live validator evaluation chunks.
+It does not publish live provider-runtime evaluation batches.
 
-## Relationship to Validator Live Evaluation
+## Relationship to the Live Miner Contract
 
-This benchmark is a public training/reference artifact, not a copy of production validator evaluation.
+The public benchmark should be treated as:
 
-Validators in production still evaluate miners using:
+- schema familiarization;
+- local training material;
+- offline evaluation support.
 
-- private human-hand data available only on validator infrastructure
-- dynamically generated mixed batches
-- previously unseen hands delivered in real time
+The live miner contract is documented in [Miner Guide](./miner.md).
 
-The public benchmark is meant to help miners train and validate against the task definition and payload shape, without revealing the live validator evaluation stream.
+Current production contract:
+
+- validators send `DetectionSynapse(chunks=...)`;
+- miners return one score per chunk;
+- each chunk may contain one or many sanitized hands.
+
+That production contract is sourced from live platform tables, not from this public artifact.

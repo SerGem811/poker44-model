@@ -1,16 +1,168 @@
-# 🔐 Poker44 Validator Guide
+# Poker44 Validator Guide
 
-Production validator guide for Poker44 subnet `126`.
+Validator guide for Poker44 subnet `126`.
 
----
+## Current Architecture
+
+Poker44 validators are now intended to run in a **consumer-only** model.
+
+That means:
+
+- validators do **not** run their own poker tables;
+- validators do **not** bootstrap provider frontend/backend locally;
+- validators do **not** build live evaluation data from local JSON on the production path;
+- validators consume canonical evaluation batches from the central Poker44 eval API;
+- validators query miners, compute rewards, and set weights on-chain.
+
+The old `mixed_dataset` mode still exists in code for compatibility and local experimentation,
+but it is no longer the target production operating path.
+
+## Separation of Responsibilities
+
+### Poker44 platform infrastructure owns
+
+- the live benchmark tables;
+- bots seated at those tables;
+- real-time gameplay;
+- SQL persistence of hands and events;
+- sanitization of evaluation payloads;
+- chunk publication through `/internal/eval/*`.
+
+### `poker44-subnet` validator owns
+
+- polling the eval API;
+- fetching the active canonical batch set;
+- querying miners;
+- scoring miner responses;
+- updating weights on-chain;
+- marking evaluated hand IDs back to the API.
+
+This is the key design boundary: live table/runtime logic lives in `poker44-platform-*`, not in
+the validator.
+
+## What the Validator Actually Sends to Miners
+
+Current validator behavior is important to understand precisely.
+
+The validator fetches `batches` from the central eval API. Each returned batch currently looks like:
+
+- one hidden label (`is_human`) on the validator side only;
+- one list of `hands`;
+- one chunk-sized evaluation unit that may contain one or many sanitized hands.
+
+Then the validator converts those batches into:
+
+- `DetectionSynapse(chunks=...)`
+
+Where:
+
+- `chunks` is a list of chunks;
+- each chunk is a list of sanitized hands;
+- each chunk may contain one or many sanitized hands;
+- miners return one score per chunk.
+
+So the current production path is **not** “one label for the entire epoch payload”.
+Instead:
+
+- the active eval payload contains many labeled batches;
+- the validator scores miners batch-by-batch;
+- each individual batch/chunk is homogeneous, so the hands inside it are all human or all bot;
+- each batch/chunk remains one scoring unit from the validator’s point of view.
+
+Relevant code:
+
+- [validator entrypoint](/Users/mac/poker44-launch/poker44-subnet/neurons/validator.py)
+- [runtime provider](/Users/mac/poker44-launch/poker44-subnet/poker44/validator/runtime_provider.py)
+- [forward cycle](/Users/mac/poker44-launch/poker44-subnet/poker44/validator/forward.py)
+- [synapse](/Users/mac/poker44-launch/poker44-subnet/poker44/validator/synapse.py)
+
+## Where the Eval Data Comes From
+
+The current production source is:
+
+1. live benchmark tables run on Poker44 platform infrastructure;
+2. those tables contain both human and bot seats;
+3. all hands are persisted to platform SQL;
+4. `poker44-platform-backend` builds sanitized evaluation batches from those benchmark-table hands;
+5. if `requireMixed=true`, only source hands that include both human and bot participation are eligible;
+6. the backend publishes an active canonical chunk for the epoch/window;
+7. validators read that active chunk through `/internal/eval/current`.
+
+## Observability And Competition Signals
+
+In `dev`, the validator also publishes two signed observability payloads:
+
+- `validator_runtime.json`
+- `network_snapshot.json`
+
+These are best-effort and are not part of the scoring path. They exist so the
+platform can expose:
+
+- validator runtime alignment;
+- live network/miner state from validator-signed metagraph snapshots;
+- a daily competition surface built on top of the canonical eval feed.
+
+The intended competition model is:
+
+- daily epoch (20:00 UTC to 20:00 UTC);
+- canonical eval windows of 2 hours inside that daily epoch;
+- continuous evaluation on canonical live hands during the epoch;
+- public provisional leaderboard during the day;
+- winner-take-all settlement after the epoch closes.
+
+Settlement behavior in `dev` now follows a platform-decided pattern:
+
+- validators fetch the canonical competition vector from
+  `/internal/competition/current/weights`;
+- once the backend has settled at least one daily winner, the latest settled
+  winner becomes the canonical competition vector for the current/vigente
+  period, but validators apply a Swarm-style burn on top of it:
+  `97%` to `uid 0`, `3%` to the backend-provided winner vector;
+- before the first daily settlement exists, the backend returns its explicit
+  fallback vector (typically `uid 0`, which remains `100%` burned);
+- validators only fall back to local score-based weights if the backend is
+  unavailable or returns no usable positive vector.
+
+Important nuance:
+
+- source hands come from live benchmark tables;
+- the backend rotates the active canonical chunk on 2-hour windows;
+- validators poll that runtime continuously (`POKER44_POLL_INTERVAL_SECONDS`,
+  300s by default) and can score the active window multiple times before the
+  next window opens;
+- the published payload can contain both human-labeled and bot-labeled batches;
+- each delivered batch/chunk is still one scoring unit from the validator’s point of view.
+
+## Pull + Restart Contract
+
+When a validator operator does only:
+
+1. `git pull`
+2. restart the validator
+
+the validator should resume normal evaluation against the central eval API.
+
+Concretely:
+
+- it starts in `provider_runtime`;
+- it connects to the central Poker44 eval API;
+- it checks whether enough real hands exist;
+- it may request publication of the current canonical chunk;
+- it fetches the active chunk;
+- it sends that chunk set to miners;
+- it computes rewards;
+- it sets weights;
+- it marks evaluated hand IDs back to the API.
 
 ## Requirements
 
-- Linux (Ubuntu 22.04+ recommended)
+- Linux server
 - Python 3.10+
-- Registered validator hotkey on netuid `126`
+- PM2
+- registered validator hotkey on netuid `126`
+- network access to the central Poker44 eval API
 
----
+No local provider stack is required in the target production model.
 
 ## Install
 
@@ -24,17 +176,13 @@ pip install -e .
 pip install bittensor-cli
 ```
 
-Or use the helper script:
+Or use:
 
 ```bash
 ./scripts/validator/main/setup.sh
 ```
 
----
-
 ## Registration
-
-`btcli` is provided by the separate `bittensor-cli` package.
 
 ```bash
 btcli subnet register \
@@ -46,90 +194,110 @@ btcli subnet register \
 btcli wallet overview --wallet.name p44_cold --subtensor.network finney
 ```
 
----
+## Runtime Modes
+
+### Production target
+
+- `POKER44_RUNTIME_MODE=provider_runtime`
+
+### Legacy compatibility mode
+
+- `POKER44_RUNTIME_MODE=mixed_dataset`
+
+`mixed_dataset` still exists for compatibility, but production validators should be treated as
+`provider_runtime` consumers of central eval data.
 
 ## Required Environment
 
-Mandatory:
+Mandatory for production:
 
-- `POKER44_HUMAN_JSON_PATH` (private local human dataset JSON)
+- `POKER44_RUNTIME_MODE=provider_runtime`
+- `WALLET_NAME`
+- `HOTKEY`
+- `POKER44_EVAL_API_BASE_URL`
+- `POKER44_PROVIDER_INTERNAL_SECRET`
 
-Optional tuning:
+Optional observability/reporting:
 
-- `POKER44_DATASET_REFRESH_SECONDS` (default `3600`)
-- `POKER44_POLL_INTERVAL_SECONDS` (default `300`)
-- `POKER44_REWARD_WINDOW` (default `40`)
-- `POKER44_CHUNK_COUNT` (default `40`)
-- `POKER44_MIN_HANDS_PER_CHUNK` (default `60`)
-- `POKER44_MAX_HANDS_PER_CHUNK` (default `120`)
-- `POKER44_HUMAN_RATIO` (default `0.5`)
-- `POKER44_MINERS_PER_CYCLE` (default `24`; set `0` or a negative value to query all eligible miners)
-- `POKER44_TARGET_MINER_UIDS` (comma-separated UIDs, useful for controlled local tests)
-- `--neuron.timeout` (default `60s`, validator -> miner query timeout)
-- `--wandb.off` (disable Weights & Biases logging)
-- `--wandb.offline` (log to local offline Weights & Biases files only)
-- `--wandb.project_name` (default `poker44-validators`)
-- `--wandb.entity` (optional W&B entity/team)
-- `--wandb.notes` (optional run notes)
-- `POKER44_VALIDATOR_RUNTIME_REPORT_URL` (optional override; defaults to `https://api.poker44.net/internal/validators/runtime`)
-- `POKER44_VALIDATOR_RUNTIME_REPORT_TIMEOUT_SECONDS` (default `5`)
+- `POKER44_VALIDATOR_RUNTIME_REPORT_URL`
+- `POKER44_VALIDATOR_NETWORK_SNAPSHOT_REPORT_URL`
 
----
+Important defaults in the current script:
+
+- `POKER44_CHUNK_COUNT=80`
+- `POKER44_REWARD_WINDOW=40`
+- `POKER44_POLL_INTERVAL_SECONDS=300`
+- `POKER44_MINERS_PER_CYCLE=16`
+- `POKER44_PROVIDER_MIN_EVAL_HANDS=40`
+- `POKER44_PROVIDER_MAX_EVAL_HANDS=70`
+- `POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT=true`
+
+Notes:
+
+- `POKER44_EVAL_API_BASE_URL` points at the central `poker44-platform-backend`;
+- `POKER44_PROVIDER_INTERNAL_SECRET` is required for `/internal/eval/*`;
+- `POKER44_CHUNK_COUNT` controls how many batches/chunks the validator will forward to miners in
+  one cycle;
+- each batch/chunk may contain one or many sanitized hands.
 
 ## Run Validator
 
-### PM2 command
+Script path:
 
-```bash
-POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
-POKER44_CHUNK_COUNT=40 \
-POKER44_REWARD_WINDOW=40 \
-POKER44_POLL_INTERVAL_SECONDS=300 \
-POKER44_MINERS_PER_CYCLE=24 \
-POKER44_SYNC_DIRECT_SCORE_UPDATE=false \
-POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE=false \
-pm2 start python --name poker44_validator -- \
-  ./neurons/validator.py \
-  --netuid 126 \
-  --wallet.name p44_cold \
-  --wallet.hotkey p44_validator \
-  --subtensor.network finney \
-  --neuron.timeout 60 \
-  --logging.debug
-```
+- `scripts/validator/run/run_vali.sh`
 
-### Script
-
-Script path: `scripts/validator/run/run_vali.sh`
-
-```bash
-chmod +x ./scripts/validator/run/run_vali.sh
-./scripts/validator/run/run_vali.sh
-```
-
-Before using the script, set at least:
-
-- `WALLET_NAME`
-- `HOTKEY`
-- `POKER44_HUMAN_JSON_PATH`
-
-The script is environment-driven. Example:
+Example:
 
 ```bash
 WALLET_NAME=p44_cold \
 HOTKEY=p44_validator \
-POKER44_HUMAN_JSON_PATH=/path/to/private/poker_data_combined.json \
-POKER44_CHUNK_COUNT=40 \
-POKER44_REWARD_WINDOW=40 \
-POKER44_POLL_INTERVAL_SECONDS=300 \
-POKER44_MINERS_PER_CYCLE=24 \
-POKER44_SYNC_DIRECT_SCORE_UPDATE=false \
-POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE=false \
-NEURON_TIMEOUT=60 \
+POKER44_RUNTIME_MODE=provider_runtime \
+POKER44_PROVIDER_INTERNAL_SECRET=replace-with-real-shared-secret \
+POKER44_EVAL_API_BASE_URL=https://api-dev.poker44.net \
 ./scripts/validator/run/run_vali.sh
 ```
 
-PM2:
+## Canonical Chunk Lifecycle
+
+The current lifecycle is:
+
+1. live benchmark tables generate real hands;
+2. hands are persisted in SQL;
+3. backend selects eligible benchmark-table hands;
+4. backend builds sanitized labeled batches from those hands;
+5. backend publishes an active canonical chunk for the current window;
+6. validator fetches it through `/internal/eval/current`;
+7. validator sends the resulting chunk list to miners;
+8. validator scores miner responses against the hidden labels;
+9. validator marks the evaluated hand IDs back to the eval API.
+
+## Current Scoring Granularity
+
+Current scoring granularity is:
+
+- one returned score per chunk;
+- one validator label per chunk;
+- one chunk may contain one or many sanitized hands.
+
+This matters for miner/operator expectations:
+
+- the live source is benchmark-table gameplay;
+- the current validator scoring contract is still chunk-level;
+- the chunk-level contract is implemented as `list[list[hand]]`, with one score expected per chunk.
+
+## What the Validator Does Not Do
+
+The production validator does **not**:
+
+- run a local poker table;
+- deploy provider frontend/backend;
+- manage DNS or TLS;
+- manage local SQL/Redis for provider runtime;
+- generate production eval data from local JSON.
+
+Those are platform responsibilities.
+
+## PM2
 
 ```bash
 pm2 logs poker44_validator
@@ -138,178 +306,8 @@ pm2 stop poker44_validator
 pm2 delete poker44_validator
 ```
 
-Startup logs now include:
+## Related Docs
 
-- validator UID and hotkey
-- subnet code version
-- `VALIDATOR_DEPLOY_VERSION`
-- git branch / short commit / dirty state
-
-The validator also writes a local runtime snapshot to:
-
-- `$(full_path)/validator_runtime.json`
-- `$(full_path)/network_snapshot.json`
-
-Those snapshots are updated automatically. The runtime snapshot includes the current version/deploy metadata, sync mode flags, latest `set_weights` result, and basic score-state counters. The network snapshot includes the validator's current metagraph-derived view of Subnet 126 for Poker44 platform dashboards.
-
-By default, both snapshots are pushed automatically to Poker44's central collector using hotkey-signed requests. Override `POKER44_VALIDATOR_RUNTIME_REPORT_URL` or `POKER44_VALIDATOR_NETWORK_SNAPSHOT_REPORT_URL` only if you need to point the validator at a different collector.
-
----
-
-## Auto-Update
-
-Poker44 supports optional validator auto-update through a separate PM2 watcher process.
-
-How it works:
-
-- The watcher checks `origin/main` periodically.
-- It reads `VALIDATOR_DEPLOY_VERSION` from `poker44/__init__.py`.
-- It updates only when the remote deploy version is newer than the local one.
-- On update, it pulls the repo, reinstalls dependencies, and restarts the validator PM2 process.
-
-Files:
-
-- `scripts/validator/update/auto_update_validator.sh`
-- `scripts/validator/update/update_validator.sh`
-- `scripts/validator/update/update_full.sh`
-
-Recommended environment for the watcher:
-
-- `PROCESS_NAME` (default `poker44_validator`)
-- `WALLET_NAME`
-- `WALLET_HOTKEY`
-- `SUBTENSOR_PARAM` (default `--subtensor.network finney`)
-- `VALIDATOR_ENV_DIR` (default `validator_env`)
-- `VALIDATOR_EXTRA_ARGS`
-- `SLEEP_INTERVAL` (default `600`)
-- `TARGET_BRANCH` (default `main`)
-
-Start the watcher:
-
-```bash
-chmod +x scripts/validator/update/auto_update_validator.sh
-pm2 start --name poker44_auto_update \
-  --interpreter /bin/bash \
-  scripts/validator/update/auto_update_validator.sh
-pm2 save
-```
-
-Typical one-time setup:
-
-```bash
-PROCESS_NAME=poker44_validator \
-WALLET_NAME=p44_cold \
-WALLET_HOTKEY=p44_validator \
-SUBTENSOR_PARAM="--subtensor.network finney" \
-VALIDATOR_ENV_DIR=validator_env \
-SLEEP_INTERVAL=600 \
-pm2 start --name poker44_auto_update \
-  --interpreter /bin/bash \
-  scripts/validator/update/auto_update_validator.sh
-```
-
-Manual update:
-
-```bash
-chmod +x scripts/validator/update/update_validator.sh
-./scripts/validator/update/update_validator.sh
-```
-
-Stop or inspect:
-
-```bash
-pm2 logs poker44_auto_update
-pm2 restart poker44_auto_update --update-env
-pm2 stop poker44_auto_update
-pm2 delete poker44_auto_update
-```
-
-The auto-update watcher now logs:
-
-- local vs remote `VALIDATOR_DEPLOY_VERSION`
-- local vs remote git commit
-- updated commit after a successful pull
-
-Notes:
-
-- Auto-update is optional.
-- Validators still control whether they enable the watcher.
-- Deploys are gated by `VALIDATOR_DEPLOY_VERSION`, not by every commit on `main`.
-
----
-
-## Runtime Behavior
-
-Per cycle, validator:
-
-1. Builds mixed labeled chunks from private human data + generated bot data.
-2. Sanitizes payloads before sending to miners.
-3. Queries miners, records any returned `model_manifest`, and scores returned `risk_scores`.
-4. Updates internal scores and attempts `set_weights` on-chain.
-
-## Model Manifest Registry
-
-Poker44 validators now persist miner model metadata separately from scoring. This does not
-change the reward loop. It records what each miner claims to be running.
-
-Current behavior:
-
-- manifests are optional for backward compatibility;
-- when present, they are normalized and stored under the validator state directory as
-  `model_manifests.json`;
-- validator compliance state is persisted separately in `compliance_registry.json`;
-- validator anti-leakage tracking also persists `suspicion_registry.json` and
-  `served_chunk_registry.json`;
-- a manifest change is detected by digest and logged once per update;
-- miners are classified as `transparent` or `opaque` based on minimum manifest fields;
-- missing or incomplete disclosure fields create suspicion events per UID;
-- served chunk fingerprints are tracked to monitor repeated exposure of evaluation payloads;
-- `set_weights` still depends on prediction quality, not on manifest presence.
-
-For the broader threat model and planned controls around leaked private data, memorization,
-and hardcoded miners, see [Anti-Leakage Policy](./anti-leakage.md).
-
-Optional W&B integration:
-
-- Logs only aggregated validator telemetry.
-- Includes dataset hash, dataset statistics, forward-cycle summaries, reward summaries, and `set_weights` status.
-- Does not publish live chunks, private human data, or the validator's mixed evaluation dataset contents.
-- Public benchmark publication for miners is documented separately in [Public benchmark + W&B](./public-benchmark.md).
-
-Default production cadence:
-
-- dataset refresh: every `3600s`
-- query loop: every `300s` unless overridden
-- miner fanout: `24` miners per cycle by default, rotating across the eligible set
-
-Validated starting profile:
-
-- `POKER44_CHUNK_COUNT=40`
-- `POKER44_REWARD_WINDOW=40`
-- `--neuron.timeout 60`
-- `POKER44_MINERS_PER_CYCLE=24`
-- `POKER44_SYNC_DIRECT_SCORE_UPDATE=false`
-- `POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE=false`
-
-These defaults were validated as a practical starting point for production-like runs:
-
-- `80` chunks with the current heuristic miners caused validator query timeouts;
-- `40` chunks with `60s` timeout completed successfully;
-- setting `POKER44_REWARD_WINDOW=40` allows miners to receive non-zero weights from the first completed cycle.
-- querying the full eligible set in one cycle degraded useful miner responses; rotating a subset per cycle was more stable.
-- increasing fanout modestly while keeping persistent scoring reduces sampling noise without reintroducing the worst timeout behavior.
-
----
-
-## Production Checklist
-
-- Validator logs show forward cycles and eligible miner UIDs.
-- Miners return non-empty `risk_scores` with expected chunk count.
-- Validator logs periodic successful weight submissions:
-  - `set_weights on chain successfully!`
-
----
-
-## Help
-
-- Open a GitHub issue for bugs or missing behavior.
+- [Miner guide](./miner.md)
+- [Public benchmark](./public-benchmark.md)
+- [Anti-leakage policy](./anti-leakage.md)

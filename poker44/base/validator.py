@@ -23,7 +23,7 @@ import asyncio
 import argparse
 import threading
 import bittensor as bt
-from typing import List, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from traceback import print_exception
 from poker44.base.neuron import BaseNeuron
 from poker44.base.utils.weight_utils import (
@@ -31,36 +31,82 @@ from poker44.base.utils.weight_utils import (
     convert_weights_and_uids_for_emit,
 )
 from poker44.utils.config import add_validator_args
-from poker44.validator.integrity import (
-    persist_json_registry,
-    remove_uid_from_compliance_registry,
-    remove_uid_from_model_manifest_registry,
-    remove_uid_from_suspicion_registry,
-)
-from poker44.validator.constants import BURN_EMISSIONS, BURN_FRACTION, UID_ZERO
 
 
-def build_weight_vector_from_scores(scores: np.ndarray) -> np.ndarray:
-    """Convert accumulated scores into on-chain weights while enforcing burn."""
-    raw_scores = np.asarray(scores, dtype=np.float32).copy()
-    raw_scores = np.nan_to_num(raw_scores, nan=0.0, posinf=0.0, neginf=0.0)
-    raw_scores[raw_scores < 0] = 0.0
+UID_ZERO = 0
+BACKEND_BURN_FRACTION = 0.97
+BACKEND_KEEP_FRACTION = 1.0 - BACKEND_BURN_FRACTION
 
-    if not BURN_EMISSIONS or raw_scores.size == 0 or UID_ZERO >= raw_scores.size:
-        return raw_scores
 
-    weight_vector = np.zeros_like(raw_scores)
-    miner_scores = raw_scores.copy()
-    miner_scores[UID_ZERO] = 0.0
-    miner_total = float(np.sum(miner_scores))
+def _extract_competition_weight_vector(
+    provider: Any,
+    metagraph_size: int,
+) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
+    """Resolve the canonical backend competition vector when available."""
 
-    if miner_total <= 0.0:
-        weight_vector[UID_ZERO] = 1.0
-        return weight_vector
+    metadata: Dict[str, Any] = {
+        "weights_source": "local_scores",
+        "settlement_epoch_id": None,
+        "settlement_source_epoch_id": None,
+        "settlement_status": None,
+        "settlement_winner_uid": None,
+    }
 
-    weight_vector[UID_ZERO] = float(BURN_FRACTION)
-    weight_vector += miner_scores / miner_total * float(1.0 - BURN_FRACTION)
-    return weight_vector
+    get_settlement = getattr(provider, "get_competition_settlement_weights", None)
+    if not callable(get_settlement):
+        return None, metadata
+
+    settlement_payload = get_settlement()
+    metadata["settlement_status"] = str(settlement_payload.get("status") or "").strip()
+    metadata["settlement_epoch_id"] = settlement_payload.get("epochId")
+    metadata["settlement_source_epoch_id"] = settlement_payload.get("sourceEpochId")
+    metadata["settlement_winner_uid"] = settlement_payload.get("winnerUid")
+    settlement_weights = settlement_payload.get("weights")
+
+    if not isinstance(settlement_weights, list):
+        return None, metadata
+
+    entries: List[Tuple[int, float]] = []
+    for entry in settlement_weights:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            uid = int(entry.get("uid"))
+            weight = float(entry.get("weight"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= uid < metagraph_size and np.isfinite(weight) and weight > 0:
+            entries.append((uid, weight))
+
+    if not entries:
+        return None, metadata
+
+    raw_weights = np.zeros(metagraph_size, dtype=np.float32)
+    has_uid_zero = any(uid == UID_ZERO for uid, _ in entries)
+
+    if has_uid_zero:
+        for uid, weight in entries:
+            raw_weights[uid] = weight
+    else:
+        total_weight = sum(weight for _, weight in entries)
+        if total_weight <= 0:
+            return None, metadata
+        for uid, weight in entries:
+            raw_weights[uid] = float(weight) * BACKEND_KEEP_FRACTION / float(total_weight)
+        if 0 <= UID_ZERO < metagraph_size:
+            raw_weights[UID_ZERO] = BACKEND_BURN_FRACTION
+
+    status = metadata["settlement_status"]
+    if status == "settled":
+        metadata["weights_source"] = "competition_settlement"
+    elif status == "fallback":
+        metadata["weights_source"] = "competition_fallback"
+    else:
+        metadata["weights_source"] = "competition_runtime"
+    metadata["burn_fraction"] = BACKEND_BURN_FRACTION if not has_uid_zero else None
+    metadata["keep_fraction"] = BACKEND_KEEP_FRACTION if not has_uid_zero else None
+
+    return raw_weights, metadata
 
 
 class BaseValidatorNeuron(BaseNeuron):
@@ -245,7 +291,7 @@ class BaseValidatorNeuron(BaseNeuron):
             self.is_running = False
             bt.logging.debug("Stopped")
 
-    def set_weights(self) -> bool:
+    def set_weights(self):
         """
         Sets the validator weights to the metagraph hotkeys based on the scores it has received from the miners. The weights determine the trust and incentive level the validator assigns to miner nodes on the network.
         """
@@ -256,9 +302,51 @@ class BaseValidatorNeuron(BaseNeuron):
                 f"Scores contain NaN values. This may be due to a lack of responses from miners, or a bug in your reward functions."
             )
 
-        # Convert accumulated scores into a weight vector while preserving the
-        # intended burn ratio to UID 0 on-chain.
-        raw_weights = build_weight_vector_from_scores(self.scores)
+        provider = getattr(self, "provider", None)
+        raw_weights, competition_weight_metadata = _extract_competition_weight_vector(
+            provider=provider,
+            metagraph_size=self.metagraph.n,
+        )
+        weights_source = str(competition_weight_metadata["weights_source"])
+        settlement_epoch_id = competition_weight_metadata["settlement_epoch_id"]
+        settlement_source_epoch_id = competition_weight_metadata["settlement_source_epoch_id"]
+        settlement_status = competition_weight_metadata["settlement_status"]
+        settlement_winner_uid = competition_weight_metadata["settlement_winner_uid"]
+
+        if raw_weights is not None:
+            nonzero_count = int(np.count_nonzero(raw_weights))
+            if weights_source == "competition_settlement":
+                bt.logging.info(
+                    "Using backend-settled competition weights | "
+                    f"epoch={settlement_epoch_id} source_epoch={settlement_source_epoch_id} "
+                    f"winner_uid={settlement_winner_uid} nonzero={nonzero_count}"
+                )
+            elif weights_source == "competition_fallback":
+                bt.logging.info(
+                    "Using backend fallback competition weights | "
+                    f"epoch={settlement_epoch_id} source_epoch={settlement_source_epoch_id} "
+                    f"winner_uid={settlement_winner_uid} nonzero={nonzero_count}"
+                )
+            else:
+                bt.logging.info(
+                    "Using backend competition weights | "
+                    f"status={settlement_status} epoch={settlement_epoch_id} "
+                    f"source_epoch={settlement_source_epoch_id} winner_uid={settlement_winner_uid} "
+                    f"nonzero={nonzero_count}"
+                )
+
+        if raw_weights is None:
+            # Calculate the average reward for each uid across non-zero values.
+            # Replace any NaN values with 0.
+            # Compute the norm of the scores
+            norm = np.linalg.norm(self.scores, ord=1, axis=0, keepdims=True)
+
+            # Check if the norm is zero or contains NaN values
+            if np.any(norm == 0) or np.isnan(norm).any():
+                norm = np.ones_like(norm)  # Avoid division by zero or NaN
+
+            # Compute raw_weights safely
+            raw_weights = self.scores / norm
 
         bt.logging.debug("raw_weights", raw_weights)
         bt.logging.debug("raw_weight_uids", str(self.metagraph.uids.tolist()))
@@ -285,7 +373,6 @@ class BaseValidatorNeuron(BaseNeuron):
         )
         bt.logging.debug("uint_weights", uint_weights)
         bt.logging.debug("uint_uids", uint_uids)
-        nonzero_uids = len(uint_uids)
 
         wait_for_inclusion = bool(self.config.neuron.wait_for_inclusion)
         wait_for_finalization = bool(self.config.neuron.wait_for_finalization)
@@ -339,6 +426,7 @@ class BaseValidatorNeuron(BaseNeuron):
             bt.logging.error("set_weights failed", msg)
         write_snapshot = getattr(self, "_write_runtime_snapshot", None)
         if callable(write_snapshot):
+            nonzero_uids = len([weight for weight in uint_weights if int(weight) > 0])
             write_snapshot(
                 status="running",
                 extra={
@@ -347,6 +435,11 @@ class BaseValidatorNeuron(BaseNeuron):
                     "last_set_weights_wait_for_inclusion": wait_for_inclusion,
                     "last_set_weights_wait_for_finalization": wait_for_finalization,
                     "last_set_weights_nonzero_uids": nonzero_uids,
+                    "last_set_weights_source": weights_source,
+                    "last_settlement_epoch_id": settlement_epoch_id,
+                    "last_settlement_source_epoch_id": settlement_source_epoch_id,
+                    "last_settlement_status": settlement_status,
+                    "last_settlement_winner_uid": settlement_winner_uid,
                 },
             )
         wandb_helper = getattr(self, "wandb_helper", None)
@@ -357,7 +450,6 @@ class BaseValidatorNeuron(BaseNeuron):
                 wait_for_inclusion=wait_for_inclusion,
                 wait_for_finalization=wait_for_finalization,
             )
-        return bool(result)
 
     def _set_weights_commit_reveal_fallback(
         self,
@@ -441,37 +533,10 @@ class BaseValidatorNeuron(BaseNeuron):
         bt.logging.info(
             "Metagraph updated, re-syncing hotkeys, dendrite pool and moving averages"
         )
-        prediction_buffer = getattr(self, "prediction_buffer", None)
-        label_buffer = getattr(self, "label_buffer", None)
-        model_manifest_registry = getattr(self, "model_manifest_registry", None)
-        compliance_registry = getattr(self, "compliance_registry", None)
-        suspicion_registry = getattr(self, "suspicion_registry", None)
-        manifest_registry_changed = False
-        compliance_registry_changed = False
-        suspicion_registry_changed = False
         # Zero out all hotkeys that have been replaced.
         for uid, hotkey in enumerate(self.hotkeys):
             if hotkey != self.metagraph.hotkeys[uid]:
                 self.scores[uid] = 0  # hotkey has been replaced
-                if isinstance(prediction_buffer, dict):
-                    prediction_buffer.pop(uid, None)
-                if isinstance(label_buffer, dict):
-                    label_buffer.pop(uid, None)
-                if isinstance(model_manifest_registry, dict):
-                    manifest_registry_changed = (
-                        remove_uid_from_model_manifest_registry(model_manifest_registry, uid)
-                        or manifest_registry_changed
-                    )
-                if isinstance(compliance_registry, dict):
-                    compliance_registry_changed = (
-                        remove_uid_from_compliance_registry(compliance_registry, uid)
-                        or compliance_registry_changed
-                    )
-                if isinstance(suspicion_registry, dict):
-                    suspicion_registry_changed = (
-                        remove_uid_from_suspicion_registry(suspicion_registry, uid)
-                        or suspicion_registry_changed
-                    )
 
         # Check to see if the metagraph has changed size.
         # If so, we need to add new hotkeys and moving averages.
@@ -481,45 +546,6 @@ class BaseValidatorNeuron(BaseNeuron):
             min_len = min(len(self.hotkeys), len(self.scores))
             new_moving_average[:min_len] = self.scores[:min_len]
             self.scores = new_moving_average
-
-        if len(self.hotkeys) > len(self.metagraph.hotkeys):
-            removed_uids = range(len(self.metagraph.hotkeys), len(self.hotkeys))
-            for uid in removed_uids:
-                if isinstance(prediction_buffer, dict):
-                    prediction_buffer.pop(uid, None)
-                if isinstance(label_buffer, dict):
-                    label_buffer.pop(uid, None)
-                if isinstance(model_manifest_registry, dict):
-                    manifest_registry_changed = (
-                        remove_uid_from_model_manifest_registry(model_manifest_registry, uid)
-                        or manifest_registry_changed
-                    )
-                if isinstance(compliance_registry, dict):
-                    compliance_registry_changed = (
-                        remove_uid_from_compliance_registry(compliance_registry, uid)
-                        or compliance_registry_changed
-                    )
-                if isinstance(suspicion_registry, dict):
-                    suspicion_registry_changed = (
-                        remove_uid_from_suspicion_registry(suspicion_registry, uid)
-                        or suspicion_registry_changed
-                    )
-
-        if manifest_registry_changed:
-            persist_json_registry(
-                getattr(self, "model_manifest_path", None),
-                model_manifest_registry,
-            )
-        if compliance_registry_changed:
-            persist_json_registry(
-                getattr(self, "compliance_registry_path", None),
-                compliance_registry,
-            )
-        if suspicion_registry_changed:
-            persist_json_registry(
-                getattr(self, "suspicion_registry_path", None),
-                suspicion_registry,
-            )
 
         # Update the hotkeys.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
@@ -557,14 +583,18 @@ class BaseValidatorNeuron(BaseNeuron):
                 f"cannot be broadcast to uids array of shape {uids_array.shape}"
             )
 
-        # Apply EMA only to the UIDs that were actually updated this cycle.
-        # Non-sampled miners should retain their existing score instead of
-        # decaying as if they had received an implicit zero reward.
+        # Compute forward pass rewards, assumes uids are mutually exclusive.
+        # shape: [ metagraph.n ]
+        scattered_rewards: np.ndarray = np.zeros_like(self.scores)
+        scattered_rewards[uids_array] = rewards
+        bt.logging.debug(f"Scattered rewards: {rewards}")
+
+        # Update scores with rewards produced by this step.
+        # shape: [ metagraph.n ]
         alpha: float = self.config.neuron.moving_average_alpha
-        observed_scores = self.scores[uids_array]
-        updated_scores = alpha * rewards + (1 - alpha) * observed_scores
-        bt.logging.debug(f"Observed rewards: {rewards}")
-        self.scores[uids_array] = updated_scores
+        self.scores: np.ndarray = (
+            alpha * scattered_rewards + (1 - alpha) * self.scores
+        )
         bt.logging.debug(f"Updated moving avg scores: {self.scores}")
 
     def save_state(self):
@@ -577,47 +607,6 @@ class BaseValidatorNeuron(BaseNeuron):
             step=self.step,
             scores=self.scores,
             hotkeys=self.hotkeys,
-            coverage_round_index=np.asarray(
-                [int(getattr(self, "coverage_round_index", 0))], dtype=np.int64
-            ),
-            coverage_round_expected_uids=np.asarray(
-                list(getattr(self, "coverage_round_expected_uids", [])), dtype=np.int64
-            ),
-            coverage_round_seen_uids=np.asarray(
-                sorted(getattr(self, "coverage_round_seen_uids", set())), dtype=np.int64
-            ),
-            coverage_round_reward_sum_uids=np.asarray(
-                sorted(getattr(self, "coverage_round_reward_sums", {}).keys()), dtype=np.int64
-            ),
-            coverage_round_reward_sum_values=np.asarray(
-                [
-                    float(getattr(self, "coverage_round_reward_sums", {}).get(uid, 0.0))
-                    for uid in sorted(getattr(self, "coverage_round_reward_sums", {}).keys())
-                ],
-                dtype=np.float32,
-            ),
-            coverage_round_reward_count_uids=np.asarray(
-                sorted(getattr(self, "coverage_round_reward_counts", {}).keys()), dtype=np.int64
-            ),
-            coverage_round_reward_count_values=np.asarray(
-                [
-                    int(getattr(self, "coverage_round_reward_counts", {}).get(uid, 0))
-                    for uid in sorted(getattr(self, "coverage_round_reward_counts", {}).keys())
-                ],
-                dtype=np.int64,
-            ),
-            coverage_round_pending_set_weights=np.asarray(
-                [int(bool(getattr(self, "coverage_round_pending_set_weights", False)))],
-                dtype=np.int64,
-            ),
-            coverage_round_completed_at_step=np.asarray(
-                [
-                    int(getattr(self, "coverage_round_completed_at_step", -1))
-                    if getattr(self, "coverage_round_completed_at_step", None) is not None
-                    else -1
-                ],
-                dtype=np.int64,
-            ),
         )
         write_snapshot = getattr(self, "_write_runtime_snapshot", None)
         if callable(write_snapshot):
@@ -639,32 +628,3 @@ class BaseValidatorNeuron(BaseNeuron):
         self.step = state["step"]
         self.scores = state["scores"]
         self.hotkeys = state["hotkeys"]
-        if "coverage_round_index" in state:
-            self.coverage_round_index = int(state["coverage_round_index"][0])
-            self.coverage_round_expected_uids = [
-                int(uid) for uid in state["coverage_round_expected_uids"].tolist()
-            ]
-            self.coverage_round_seen_uids = {
-                int(uid) for uid in state["coverage_round_seen_uids"].tolist()
-            }
-            self.coverage_round_reward_sums = {
-                int(uid): float(value)
-                for uid, value in zip(
-                    state["coverage_round_reward_sum_uids"].tolist(),
-                    state["coverage_round_reward_sum_values"].tolist(),
-                )
-            }
-            self.coverage_round_reward_counts = {
-                int(uid): int(value)
-                for uid, value in zip(
-                    state["coverage_round_reward_count_uids"].tolist(),
-                    state["coverage_round_reward_count_values"].tolist(),
-                )
-            }
-            self.coverage_round_pending_set_weights = bool(
-                int(state["coverage_round_pending_set_weights"][0])
-            )
-            completed_at_step = int(state["coverage_round_completed_at_step"][0])
-            self.coverage_round_completed_at_step = (
-                completed_at_step if completed_at_step >= 0 else None
-            )

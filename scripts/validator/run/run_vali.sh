@@ -14,16 +14,20 @@ PM2_NAME="${PM2_NAME:-poker44_validator}"  ##  name of validator, as you wish
 VALIDATOR_ENV_DIR="${VALIDATOR_ENV_DIR:-validator_env}"
 WALLET_PATH="${WALLET_PATH:-}"
 VALIDATOR_EXTRA_ARGS="${VALIDATOR_EXTRA_ARGS:-}"
-POKER44_HUMAN_JSON_PATH="${POKER44_HUMAN_JSON_PATH:-/path/to/private/poker_data_combined.json}"
-POKER44_CHUNK_COUNT="${POKER44_CHUNK_COUNT:-40}"
+POKER44_HUMAN_JSON_PATH="${POKER44_HUMAN_JSON_PATH:-/path/to/local/poker_data_combined.json}"
+POKER44_RUNTIME_MODE="${POKER44_RUNTIME_MODE:-provider_runtime}"
+POKER44_CHUNK_COUNT="${POKER44_CHUNK_COUNT:-80}"
 POKER44_REWARD_WINDOW="${POKER44_REWARD_WINDOW:-40}"
 POKER44_POLL_INTERVAL_SECONDS="${POKER44_POLL_INTERVAL_SECONDS:-300}"
-POKER44_MINERS_PER_CYCLE="${POKER44_MINERS_PER_CYCLE:-24}"
-POKER44_SYNCED_WINDOW_MODE="${POKER44_SYNCED_WINDOW_MODE:-true}"
-POKER44_SYNC_ALL_MINERS="${POKER44_SYNC_ALL_MINERS:-false}"
-POKER44_SYNC_DIRECT_SCORE_UPDATE="${POKER44_SYNC_DIRECT_SCORE_UPDATE:-false}"
-POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE="${POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE:-false}"
+POKER44_MINERS_PER_CYCLE="${POKER44_MINERS_PER_CYCLE:-16}"
 NEURON_TIMEOUT="${NEURON_TIMEOUT:-60}"
+POKER44_EVAL_API_BASE_URL="${POKER44_EVAL_API_BASE_URL:-}"
+POKER44_PROVIDER_API_BASE_URL="${POKER44_PROVIDER_API_BASE_URL:-$POKER44_EVAL_API_BASE_URL}"
+POKER44_PROVIDER_INTERNAL_SECRET="${POKER44_PROVIDER_INTERNAL_SECRET:-}"
+POKER44_PROVIDER_MIN_EVAL_HANDS="${POKER44_PROVIDER_MIN_EVAL_HANDS:-40}"
+POKER44_PROVIDER_MAX_EVAL_HANDS="${POKER44_PROVIDER_MAX_EVAL_HANDS:-70}"
+POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT="${POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT:-true}"
+POKER44_PROVIDER_VALIDATOR_ID="${POKER44_PROVIDER_VALIDATOR_ID:-}"
 
 if [ -x "$VALIDATOR_ENV_DIR/bin/python" ]; then
     PYTHON_BIN="$VALIDATOR_ENV_DIR/bin/python"
@@ -41,10 +45,25 @@ if [ ! -f "$VALIDATOR_SCRIPT" ]; then
     exit 1
 fi
 
-if [ ! -f "$POKER44_HUMAN_JSON_PATH" ]; then
-    echo "Error: Private validator human dataset not found at $POKER44_HUMAN_JSON_PATH"
+if [ "$POKER44_RUNTIME_MODE" = "mixed_dataset" ] && [ ! -f "$POKER44_HUMAN_JSON_PATH" ]; then
+    echo "Error: Validator human dataset not found at $POKER44_HUMAN_JSON_PATH"
     echo "Set POKER44_HUMAN_JSON_PATH in scripts/validator/run/run_vali.sh before starting."
     exit 1
+fi
+
+if [ "$POKER44_RUNTIME_MODE" = "provider_runtime" ] && [ "$POKER44_PROVIDER_INTERNAL_SECRET" = "force-start-secret" ]; then
+    echo "Error: POKER44_PROVIDER_INTERNAL_SECRET cannot be set to the placeholder force-start-secret."
+    exit 1
+fi
+
+if [ "$POKER44_RUNTIME_MODE" = "provider_runtime" ] && [ -z "$POKER44_EVAL_API_BASE_URL" ]; then
+    echo "Error: POKER44_EVAL_API_BASE_URL is required in provider_runtime mode."
+    exit 1
+fi
+
+if [ "$POKER44_RUNTIME_MODE" = "provider_runtime" ] && [ -z "$POKER44_PROVIDER_INTERNAL_SECRET" ]; then
+    echo "Warning: POKER44_PROVIDER_INTERNAL_SECRET is unset; validator-facing eval calls will use signed hotkey auth only."
+    echo "Warning: admin eval actions such as publish-current will be skipped unless the backend auto-publishes the active chunk."
 fi
 
 if ! command -v pm2 &> /dev/null; then
@@ -59,22 +78,22 @@ if ! "$PYTHON_BIN" -c "import bittensor, dotenv, numpy, pandas, sklearn" >/dev/n
     exit 1
 fi
 
-GIT_BRANCH="$(git branch --show-current 2>/dev/null || true)"
-GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)"
-DEPLOY_VERSION="$(grep -E '^VALIDATOR_DEPLOY_VERSION[[:space:]]*=' poker44/__init__.py 2>/dev/null | head -n1 | sed -E 's/^VALIDATOR_DEPLOY_VERSION[[:space:]]*=[[:space:]]*["'\'']([^"'\'']+)["'\'']/\1/')"
-
 pm2 delete $PM2_NAME 2>/dev/null || true
 
 export PYTHONPATH="$(pwd)"
+export POKER44_RUNTIME_MODE="$POKER44_RUNTIME_MODE"
 export POKER44_HUMAN_JSON_PATH="$POKER44_HUMAN_JSON_PATH"
 export POKER44_CHUNK_COUNT="$POKER44_CHUNK_COUNT"
 export POKER44_REWARD_WINDOW="$POKER44_REWARD_WINDOW"
 export POKER44_POLL_INTERVAL_SECONDS="$POKER44_POLL_INTERVAL_SECONDS"
 export POKER44_MINERS_PER_CYCLE="$POKER44_MINERS_PER_CYCLE"
-export POKER44_SYNCED_WINDOW_MODE="$POKER44_SYNCED_WINDOW_MODE"
-export POKER44_SYNC_ALL_MINERS="$POKER44_SYNC_ALL_MINERS"
-export POKER44_SYNC_DIRECT_SCORE_UPDATE="$POKER44_SYNC_DIRECT_SCORE_UPDATE"
-export POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE="$POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE"
+export POKER44_EVAL_API_BASE_URL="$POKER44_EVAL_API_BASE_URL"
+export POKER44_PROVIDER_API_BASE_URL="$POKER44_PROVIDER_API_BASE_URL"
+export POKER44_PROVIDER_INTERNAL_SECRET="$POKER44_PROVIDER_INTERNAL_SECRET"
+export POKER44_PROVIDER_MIN_EVAL_HANDS="$POKER44_PROVIDER_MIN_EVAL_HANDS"
+export POKER44_PROVIDER_MAX_EVAL_HANDS="$POKER44_PROVIDER_MAX_EVAL_HANDS"
+export POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT="$POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT"
+export POKER44_PROVIDER_VALIDATOR_ID="$POKER44_PROVIDER_VALIDATOR_ID"
 export PM2_NAME="$PM2_NAME"
 export VALIDATOR_ENV_DIR="$VALIDATOR_ENV_DIR"
 
@@ -112,8 +131,11 @@ pm2 save
 
 echo "Validator started: $PM2_NAME"
 echo "View logs: pm2 logs $PM2_NAME"
-echo "Code: branch=${GIT_BRANCH:-<unknown>} commit=${GIT_COMMIT:-<unknown>} deploy_version=${DEPLOY_VERSION:-<unknown>}"
 echo "Config: netuid=$NETUID network=$NETWORK wallet=$WALLET_NAME hotkey=$HOTKEY python=$PYTHON_BIN"
 echo "Subtensor args: ${SUBTENSOR_PARAM:---subtensor.network $NETWORK}"
 echo "Runtime extras: wallet_path=${WALLET_PATH:-<default>} extra_args=${VALIDATOR_EXTRA_ARGS:-<none>}"
-echo "Profile: chunks=$POKER44_CHUNK_COUNT reward_window=$POKER44_REWARD_WINDOW poll_interval_s=$POKER44_POLL_INTERVAL_SECONDS miners_per_cycle=$POKER44_MINERS_PER_CYCLE timeout_s=$NEURON_TIMEOUT sync_window_mode=$POKER44_SYNCED_WINDOW_MODE sync_all_miners=$POKER44_SYNC_ALL_MINERS direct_score_update=$POKER44_SYNC_DIRECT_SCORE_UPDATE"
+echo "Profile: runtime_mode=$POKER44_RUNTIME_MODE chunks=$POKER44_CHUNK_COUNT reward_window=$POKER44_REWARD_WINDOW poll_interval_s=$POKER44_POLL_INTERVAL_SECONDS miners_per_cycle=$POKER44_MINERS_PER_CYCLE timeout_s=$NEURON_TIMEOUT"
+if [ "$POKER44_RUNTIME_MODE" = "provider_runtime" ]; then
+  echo "Provider runtime: eval_api=$POKER44_EVAL_API_BASE_URL min_eval_hands=$POKER44_PROVIDER_MIN_EVAL_HANDS max_eval_hands=$POKER44_PROVIDER_MAX_EVAL_HANDS attempt_publish_current=$POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT"
+  echo "Provider source: central platform backend validator_id=${POKER44_PROVIDER_VALIDATOR_ID:-<wallet hotkey>}"
+fi

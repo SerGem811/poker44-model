@@ -22,9 +22,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
-
-import numpy as np
+from typing import Any, Optional
 
 import bittensor as bt
 from dotenv import load_dotenv
@@ -41,9 +39,10 @@ from poker44.utils.runtime_info import (
 )
 from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
-from poker44.validator.integrity import (
-    load_json_registry,
-    normalize_uid_key_registry,
+from poker44.validator.integrity import load_json_registry
+from poker44.validator.runtime_provider import (
+    ProviderRuntimeConfig,
+    ProviderRuntimeDatasetProvider,
 )
 from hands_generator.mixed_dataset_provider import (
     DEFAULT_OUTPUT_PATH,
@@ -62,11 +61,9 @@ DEFAULT_VALIDATOR_RUNTIME_REPORT_URL = (
 DEFAULT_NETWORK_SNAPSHOT_REPORT_URL = (
     "https://api.poker44.net/internal/network/snapshots"
 )
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = str(os.getenv(name, str(default))).strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+DEFAULT_COMPETITION_SCORE_REPORT_URL = (
+    "https://api.poker44.net/internal/competition/report-scores"
+)
 
 
 class Validator(BaseValidatorNeuron):
@@ -74,110 +71,86 @@ class Validator(BaseValidatorNeuron):
 
     def __init__(self):
         cfg = config(Validator)
-        self.poll_interval = None
-        self.reward_window = None
-        self.synced_window_mode = None
-        self.sync_all_miners = None
-        self.sync_direct_score_update = None
-        self.coverage_round_index = 0
-        self.coverage_round_expected_uids = []
-        self.coverage_round_seen_uids = set()
-        self.coverage_round_reward_sums = {}
-        self.coverage_round_reward_counts = {}
-        self.coverage_round_pending_set_weights = False
-        self.coverage_round_completed_at_step = None
+        self.poll_interval = int(
+            os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(getattr(cfg, "poll_interval_seconds", 300)))
+        )
+        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
+        self.runtime_mode = str(
+            os.getenv("POKER44_RUNTIME_MODE", "provider_runtime")
+        ).strip().lower()
         super().__init__(config=cfg)
         bt.logging.info(f"🚀 Poker44 Validator v{__version__} started")
 
         self.forward_count = 0
         self.settings = cfg
-
-        human_json_env = os.getenv("POKER44_HUMAN_JSON_PATH")
-        if not human_json_env:
-            raise RuntimeError(
-                "POKER44_HUMAN_JSON_PATH must point to the private local human-hand JSON used by validators."
-            )
-
-        human_json_path = Path(human_json_env).expanduser().resolve()
-        mixed_output_path = Path(
-            os.getenv("POKER44_MIXED_DATASET_PATH", str(DEFAULT_OUTPUT_PATH))
-        ).expanduser().resolve()
-        refresh_seconds = int(
-            os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60))
-        )
+        refresh_seconds = int(os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60)))
         chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "40"))
-        min_hands_per_chunk = int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))
-        max_hands_per_chunk = int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))
-        human_ratio = float(os.getenv("POKER44_HUMAN_RATIO", "0.5"))
-        dataset_seed_env = os.getenv("POKER44_DATASET_SEED")
-        dataset_seed = int(dataset_seed_env) if dataset_seed_env is not None else None
         self.chunk_batch_size = chunk_count
-        self.dataset_cfg = MixedDatasetConfig(
-            human_json_path=human_json_path,
-            output_path=mixed_output_path,
-            chunk_count=chunk_count,
-            min_hands_per_chunk=min_hands_per_chunk,
-            max_hands_per_chunk=max_hands_per_chunk,
-            human_ratio=human_ratio,
-            refresh_seconds=refresh_seconds,
-            seed=dataset_seed,
-        )
-        self.provider = TimedMixedDatasetProvider(self.dataset_cfg)
-        bt.logging.info(
-            f"📁 Using mixed dataset provider | human_json={human_json_path} output={mixed_output_path} "
-            f"chunks={chunk_count} hands_range=[{min_hands_per_chunk},{max_hands_per_chunk}] "
-            f"ratio={human_ratio} refresh_s={refresh_seconds}"
-        )
-        bt.logging.info("🧭 Dataset generation is deterministic per refresh window.")
-        configured_poll_interval = getattr(cfg, "poll_interval_seconds", refresh_seconds)
+
+        if self.runtime_mode == "provider_runtime":
+            provider_runtime_cfg = ProviderRuntimeConfig.from_env(
+                default_validator_id=self.wallet.hotkey.ss58_address
+            )
+            self.dataset_cfg = provider_runtime_cfg.public_summary()
+            self.provider = ProviderRuntimeDatasetProvider(
+                provider_runtime_cfg,
+                wallet=self.wallet,
+            )
+            bt.logging.info(
+                "🎯 Using provider runtime dataset provider | "
+                f"api={provider_runtime_cfg.api_base_url} "
+                f"validator_id={provider_runtime_cfg.validator_id}"
+            )
+            configured_poll_interval = getattr(cfg, "poll_interval_seconds", 30)
+        else:
+            human_json_env = os.getenv("POKER44_HUMAN_JSON_PATH")
+            if not human_json_env:
+                raise RuntimeError(
+                    "POKER44_HUMAN_JSON_PATH must point to the local human-hand JSON used by validators."
+                )
+
+            human_json_path = Path(human_json_env).expanduser().resolve()
+            mixed_output_path = Path(
+                os.getenv("POKER44_MIXED_DATASET_PATH", str(DEFAULT_OUTPUT_PATH))
+            ).expanduser().resolve()
+            min_hands_per_chunk = int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))
+            max_hands_per_chunk = int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))
+            human_ratio = float(os.getenv("POKER44_HUMAN_RATIO", "0.5"))
+            dataset_seed_env = os.getenv("POKER44_DATASET_SEED")
+            dataset_seed = int(dataset_seed_env) if dataset_seed_env is not None else None
+            self.dataset_cfg = MixedDatasetConfig(
+                human_json_path=human_json_path,
+                output_path=mixed_output_path,
+                chunk_count=chunk_count,
+                min_hands_per_chunk=min_hands_per_chunk,
+                max_hands_per_chunk=max_hands_per_chunk,
+                human_ratio=human_ratio,
+                refresh_seconds=refresh_seconds,
+                seed=dataset_seed,
+            )
+            self.provider = TimedMixedDatasetProvider(self.dataset_cfg)
+            bt.logging.info(
+                f"📁 Using mixed dataset provider | human_json={human_json_path} output={mixed_output_path} "
+                f"chunks={chunk_count} hands_range=[{min_hands_per_chunk},{max_hands_per_chunk}] "
+                f"ratio={human_ratio} refresh_s={refresh_seconds}"
+            )
+            bt.logging.info("🧭 Dataset generation is deterministic per refresh window.")
+            configured_poll_interval = getattr(cfg, "poll_interval_seconds", refresh_seconds)
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )
-        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "40"))
-        self.synced_window_mode = _env_bool("POKER44_SYNCED_WINDOW_MODE", True)
-        self.sync_all_miners = _env_bool("POKER44_SYNC_ALL_MINERS", False)
-        # Keep synchronized evaluation windows, but default to persistent scoring so
-        # short outages and uneven request coverage do not reset miner rankings.
-        self.sync_direct_score_update = _env_bool(
-            "POKER44_SYNC_DIRECT_SCORE_UPDATE",
-            False,
-        )
-        self.sync_reset_buffers_on_window_change = _env_bool(
-            "POKER44_SYNC_RESET_BUFFERS_ON_WINDOW_CHANGE",
-            False,
-        )
-        self.current_eval_window_id: Optional[int] = None
-        self.coverage_round_index = int(getattr(self, "coverage_round_index", 0))
-        self.coverage_round_expected_uids: List[int] = list(
-            getattr(self, "coverage_round_expected_uids", [])
-        )
-        self.coverage_round_seen_uids: set[int] = set(
-            getattr(self, "coverage_round_seen_uids", set())
-        )
-        self.coverage_round_reward_sums: Dict[int, float] = dict(
-            getattr(self, "coverage_round_reward_sums", {})
-        )
-        self.coverage_round_reward_counts: Dict[int, int] = dict(
-            getattr(self, "coverage_round_reward_counts", {})
-        )
-        self.coverage_round_pending_set_weights = bool(
-            getattr(self, "coverage_round_pending_set_weights", False)
-        )
-        self.coverage_round_completed_at_step = getattr(
-            self, "coverage_round_completed_at_step", None
-        )
+        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", str(self.reward_window)))
         self.prediction_buffer = {}
         self.label_buffer = {}
+        self.coverage_buffer = {}
+        self.latency_buffer = {}
+        self.competition_scores_payload = []
         state_dir = Path(self.config.neuron.full_path)
         self.model_manifest_path = state_dir / "model_manifests.json"
         self.compliance_registry_path = state_dir / "compliance_registry.json"
         self.suspicion_registry_path = state_dir / "suspicion_registry.json"
         self.served_chunk_registry_path = state_dir / "served_chunk_registry.json"
         self.model_manifest_registry = load_json_registry(self.model_manifest_path)
-        if self.model_manifest_registry:
-            self.model_manifest_registry = normalize_uid_key_registry(
-                self.model_manifest_registry
-            )
         self.compliance_registry = load_json_registry(
             self.compliance_registry_path,
             default={"miners": {}, "summary": {}},
@@ -201,25 +174,9 @@ class Validator(BaseValidatorNeuron):
             dataset_cfg=self.dataset_cfg,
             poll_interval=self.poll_interval,
             reward_window=self.reward_window,
-            runtime_info=self.runtime_info,
         )
-        bt.logging.info(
-            "🪟 Validator sync mode | "
-            f"synced_window_mode={self.synced_window_mode} "
-            f"sync_all_miners={self.sync_all_miners} "
-            f"direct_score_update={self.sync_direct_score_update} "
-            f"reset_buffers_on_window_change={self.sync_reset_buffers_on_window_change}"
-        )
-        bt.logging.info(
-            "🧾 Validator runtime | "
-            f"uid={self.resolve_uid(self.wallet.hotkey.ss58_address)} "
-            f"hotkey={self.wallet.hotkey.ss58_address} "
-            f"version={__version__} "
-            f"deploy_version={VALIDATOR_DEPLOY_VERSION} "
-            f"git_branch={self.runtime_info.get('git_branch', '')} "
-            f"git_commit={self.runtime_info.get('git_commit_short', '')} "
-            f"git_dirty={self.runtime_info.get('git_dirty', False)}"
-        )
+        self.deploy_version = VALIDATOR_DEPLOY_VERSION
+        self.version = __version__
         self._write_runtime_snapshot(status="started")
 
     def resolve_uid(self, hotkey: str) -> Optional[int]:
@@ -237,7 +194,7 @@ class Validator(BaseValidatorNeuron):
         return Path(self.config.neuron.full_path) / "network_snapshot.json"
 
     @property
-    def runtime_info(self) -> dict:
+    def runtime_info(self) -> dict[str, Any]:
         info = getattr(self, "_runtime_info", None)
         if info is None:
             info = collect_runtime_info()
@@ -245,6 +202,11 @@ class Validator(BaseValidatorNeuron):
         return info
 
     def _write_runtime_snapshot(self, *, status: str, extra: Optional[dict] = None) -> None:
+        provider_stats = (
+            getattr(self.provider, "stats", {})
+            if hasattr(self, "provider") and hasattr(self.provider, "stats")
+            else {}
+        )
         payload = {
             "status": status,
             "validator_uid": self.resolve_uid(self.wallet.hotkey.ss58_address),
@@ -252,22 +214,30 @@ class Validator(BaseValidatorNeuron):
             "version": __version__,
             "deploy_version": VALIDATOR_DEPLOY_VERSION,
             "netuid": self.config.netuid,
+            "runtime_mode": getattr(self, "runtime_mode", "initializing"),
             "poll_interval": getattr(self, "poll_interval", None),
             "reward_window": getattr(self, "reward_window", None),
-            "synced_window_mode": getattr(self, "synced_window_mode", None),
-            "sync_all_miners": getattr(self, "sync_all_miners", None),
-            "sync_direct_score_update": getattr(self, "sync_direct_score_update", None),
-            "coverage_round_index": getattr(self, "coverage_round_index", None),
-            "coverage_round_expected_count": len(getattr(self, "coverage_round_expected_uids", []) or []),
-            "coverage_round_seen_count": len(getattr(self, "coverage_round_seen_uids", set()) or set()),
-            "coverage_round_pending_set_weights": getattr(
-                self, "coverage_round_pending_set_weights", None
-            ),
+            "chunk_batch_size": getattr(self, "chunk_batch_size", None),
+            "step": int(getattr(self, "step", 0)),
+            "score_slots": int(len(getattr(self, "scores", []))) if hasattr(self, "scores") else 0,
+            "nonzero_scores": int((getattr(self, "scores", []) != 0).sum())
+            if hasattr(self, "scores")
+            else 0,
+            "dataset_stats": provider_stats,
+            "competition_epoch_id": provider_stats.get("competition_epoch_id"),
+            "competition_epoch_start": provider_stats.get("competition_epoch_start"),
+            "competition_epoch_end": provider_stats.get("competition_epoch_end"),
+            "competition_settlement_mode": provider_stats.get("competition_settlement_mode"),
+            "active_window_start": provider_stats.get("active_window_start"),
+            "active_window_end": provider_stats.get("active_window_end"),
+            "active_chunk_id": provider_stats.get("active_chunk_id"),
+            "active_chunk_hash": provider_stats.get("active_chunk_hash"),
+            "competition_scores": list(getattr(self, "competition_scores_payload", []) or []),
             "runtime": self.runtime_info,
         }
-        self.deploy_version = VALIDATOR_DEPLOY_VERSION
         if extra:
             payload.update(extra)
+
         write_runtime_snapshot(self.runtime_snapshot_path, payload)
         report_url = str(
             os.getenv(
@@ -333,121 +303,76 @@ class Validator(BaseValidatorNeuron):
                     f"url={network_report_url} message={message}"
                 )
 
+    def _report_competition_scores(self) -> None:
+        rows = list(getattr(self, "competition_scores_payload", []) or [])
+        if not rows:
+            return
+
+        provider_stats = (
+            getattr(self.provider, "stats", {})
+            if hasattr(self, "provider") and hasattr(self.provider, "stats")
+            else {}
+        )
+        payload = {
+            "hotkey": self.wallet.hotkey.ss58_address,
+            "validator_uid": self.resolve_uid(self.wallet.hotkey.ss58_address),
+            "competition_epoch_id": provider_stats.get("competition_epoch_id"),
+            "competition_epoch_start": provider_stats.get("competition_epoch_start"),
+            "competition_epoch_end": provider_stats.get("competition_epoch_end"),
+            "active_chunk_id": provider_stats.get("active_chunk_id"),
+            "active_chunk_hash": provider_stats.get("active_chunk_hash"),
+            "active_window_start": provider_stats.get("active_window_start"),
+            "active_window_end": provider_stats.get("active_window_end"),
+            "competition_scores": rows,
+        }
+        epoch_id = str(payload.get("competition_epoch_id") or "").strip()
+        if not epoch_id:
+            bt.logging.warning(
+                "Skipping competition score report because provider stats do not contain a competition epoch id."
+            )
+            return
+
+        report_url = str(os.getenv("POKER44_COMPETITION_SCORE_REPORT_URL", "")).strip()
+        if not report_url and self.runtime_mode == "provider_runtime":
+            api_base_url = str(
+                os.getenv(
+                    "POKER44_EVAL_API_BASE_URL",
+                    os.getenv("POKER44_PROVIDER_API_BASE_URL", ""),
+                )
+            ).strip().rstrip("/")
+            if api_base_url:
+                report_url = f"{api_base_url}/internal/competition/report-scores"
+        if not report_url:
+            report_url = DEFAULT_COMPETITION_SCORE_REPORT_URL
+        if not report_url:
+            return
+
+        timeout_seconds = float(
+            os.getenv("POKER44_COMPETITION_SCORE_REPORT_TIMEOUT_SECONDS", "5")
+        )
+        signed_request = build_signed_runtime_request(
+            wallet=self.wallet,
+            url=report_url,
+            payload=payload,
+        )
+        ok, message = post_runtime_snapshot(
+            url=report_url,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+            **signed_request,
+        )
+        if ok:
+            bt.logging.debug(
+                f"Competition score report delivered successfully: {report_url}"
+            )
+        else:
+            bt.logging.warning(
+                "Competition score report failed | "
+                f"url={report_url} message={message}"
+            )
+
     async def forward(self, synapse=None):  # type: ignore[override]
         return await forward_cycle(self)
-
-    def begin_coverage_round(self, expected_uids: List[int], *, reason: str) -> None:
-        ordered_uids = sorted(int(uid) for uid in expected_uids)
-        self.coverage_round_index += 1
-        self.coverage_round_expected_uids = ordered_uids
-        self.coverage_round_seen_uids = set()
-        self.coverage_round_reward_sums = {uid: 0.0 for uid in ordered_uids}
-        self.coverage_round_reward_counts = {uid: 0 for uid in ordered_uids}
-        self.coverage_round_pending_set_weights = False
-        self.coverage_round_completed_at_step = None
-        bt.logging.info(
-            f"Started coverage round #{self.coverage_round_index} with "
-            f"{len(ordered_uids)} eligible miner(s) ({reason})."
-        )
-
-    def ensure_coverage_round(self, expected_uids: List[int], *, reason: str) -> None:
-        normalized_expected = sorted(int(uid) for uid in expected_uids)
-        if not self.coverage_round_expected_uids:
-            self.begin_coverage_round(normalized_expected, reason=reason)
-            return
-        previous_expected = set(self.coverage_round_expected_uids)
-        current_expected = set(normalized_expected)
-        if previous_expected == current_expected:
-            self.coverage_round_expected_uids = normalized_expected
-            return
-
-        added = sorted(current_expected - previous_expected)
-        removed = sorted(previous_expected - current_expected)
-
-        self.coverage_round_expected_uids = normalized_expected
-        self.coverage_round_seen_uids &= current_expected
-        self.coverage_round_reward_sums = {
-            uid: float(self.coverage_round_reward_sums.get(uid, 0.0))
-            for uid in normalized_expected
-        }
-        self.coverage_round_reward_counts = {
-            uid: int(self.coverage_round_reward_counts.get(uid, 0))
-            for uid in normalized_expected
-        }
-
-        bt.logging.info(
-            f"Coverage round #{self.coverage_round_index} reconciled eligible set "
-            f"(+{len(added)} / -{len(removed)}) ({reason})."
-        )
-
-        if current_expected and len(self.coverage_round_seen_uids) >= len(current_expected):
-            self.coverage_round_pending_set_weights = True
-            self.coverage_round_completed_at_step = int(getattr(self, "step", 0))
-            bt.logging.info(
-                f"Coverage round #{self.coverage_round_index} complete after eligible-set reconciliation; "
-                "weights are now eligible to publish."
-            )
-
-    def record_round_cycle(self, *, sampled_uids: List[int], reward_map: Dict[int, float]) -> None:
-        if self.coverage_round_pending_set_weights:
-            return
-
-        for uid in sampled_uids:
-            normalized_uid = int(uid)
-            if normalized_uid not in self.coverage_round_reward_sums:
-                continue
-            self.coverage_round_seen_uids.add(normalized_uid)
-            self.coverage_round_reward_sums[normalized_uid] += float(
-                reward_map.get(normalized_uid, 0.0)
-            )
-            self.coverage_round_reward_counts[normalized_uid] += 1
-
-        seen = len(self.coverage_round_seen_uids)
-        expected = len(self.coverage_round_expected_uids)
-        bt.logging.info(
-            f"Coverage round #{self.coverage_round_index}: seen "
-            f"{seen}/{expected} eligible miner(s)."
-        )
-
-        if expected > 0 and seen >= expected:
-            self.coverage_round_pending_set_weights = True
-            self.coverage_round_completed_at_step = int(getattr(self, "step", 0))
-            bt.logging.info(
-                f"Coverage round #{self.coverage_round_index} complete; "
-                "weights are now eligible to publish."
-            )
-
-    def build_scores_from_coverage_round(self) -> np.ndarray:
-        round_scores = np.zeros(self.metagraph.n, dtype=np.float32)
-        for uid in self.coverage_round_expected_uids:
-            count = int(self.coverage_round_reward_counts.get(uid, 0))
-            if count <= 0:
-                continue
-            avg_reward = float(self.coverage_round_reward_sums.get(uid, 0.0)) / float(count)
-            round_scores[int(uid)] = max(0.0, avg_reward)
-        return round_scores
-
-    def should_set_weights(self) -> bool:  # type: ignore[override]
-        if not self.coverage_round_pending_set_weights:
-            return False
-        return super().should_set_weights()
-
-    def set_weights(self) -> bool:  # type: ignore[override]
-        if not self.coverage_round_pending_set_weights:
-            bt.logging.info(
-                f"Skipping set_weights: coverage round #{self.coverage_round_index} "
-                "has not yet covered all eligible miners."
-            )
-            return False
-
-        self.scores = self.build_scores_from_coverage_round()
-        success = super().set_weights()
-        if success:
-            self.begin_coverage_round(
-                self.coverage_round_expected_uids,
-                reason="previous round published on-chain",
-            )
-        return success
 
     def __del__(self) -> None:
         wandb_helper = getattr(self, "wandb_helper", None)
