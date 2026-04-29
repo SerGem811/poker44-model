@@ -14,7 +14,6 @@ PM2_NAME="${PM2_NAME:-poker44_validator}"  ##  name of validator, as you wish
 VALIDATOR_ENV_DIR="${VALIDATOR_ENV_DIR:-validator_env}"
 WALLET_PATH="${WALLET_PATH:-}"
 VALIDATOR_EXTRA_ARGS="${VALIDATOR_EXTRA_ARGS:-}"
-POKER44_HUMAN_JSON_PATH="${POKER44_HUMAN_JSON_PATH:-/path/to/local/poker_data_combined.json}"
 POKER44_RUNTIME_MODE="${POKER44_RUNTIME_MODE:-provider_runtime}"
 POKER44_CHUNK_COUNT="${POKER44_CHUNK_COUNT:-80}"
 POKER44_REWARD_WINDOW="${POKER44_REWARD_WINDOW:-40}"
@@ -45,9 +44,8 @@ if [ ! -f "$VALIDATOR_SCRIPT" ]; then
     exit 1
 fi
 
-if [ "$POKER44_RUNTIME_MODE" = "mixed_dataset" ] && [ ! -f "$POKER44_HUMAN_JSON_PATH" ]; then
-    echo "Error: Validator human dataset not found at $POKER44_HUMAN_JSON_PATH"
-    echo "Set POKER44_HUMAN_JSON_PATH in scripts/validator/run/run_vali.sh before starting."
+if [ "$POKER44_RUNTIME_MODE" != "provider_runtime" ]; then
+    echo "Error: Only POKER44_RUNTIME_MODE=provider_runtime is supported."
     exit 1
 fi
 
@@ -77,7 +75,6 @@ pm2 delete $PM2_NAME 2>/dev/null || true
 
 export PYTHONPATH="$(pwd)"
 export POKER44_RUNTIME_MODE="$POKER44_RUNTIME_MODE"
-export POKER44_HUMAN_JSON_PATH="$POKER44_HUMAN_JSON_PATH"
 export POKER44_CHUNK_COUNT="$POKER44_CHUNK_COUNT"
 export POKER44_REWARD_WINDOW="$POKER44_REWARD_WINDOW"
 export POKER44_POLL_INTERVAL_SECONDS="$POKER44_POLL_INTERVAL_SECONDS"

@@ -44,11 +44,6 @@ from poker44.validator.runtime_provider import (
     ProviderRuntimeConfig,
     ProviderRuntimeDatasetProvider,
 )
-from hands_generator.mixed_dataset_provider import (
-    DEFAULT_OUTPUT_PATH,
-    MixedDatasetConfig,
-    TimedMixedDatasetProvider,
-)
 
 load_dotenv()
 os.makedirs("./logs", exist_ok=True)
@@ -78,6 +73,11 @@ class Validator(BaseValidatorNeuron):
         self.runtime_mode = str(
             os.getenv("POKER44_RUNTIME_MODE", "provider_runtime")
         ).strip().lower()
+        if self.runtime_mode != "provider_runtime":
+            raise RuntimeError(
+                "Legacy local runtime has been removed. "
+                "Use POKER44_RUNTIME_MODE=provider_runtime."
+            )
         super().__init__(config=cfg)
         bt.logging.info(f"🚀 Poker44 Validator v{__version__} started")
 
@@ -87,55 +87,20 @@ class Validator(BaseValidatorNeuron):
         chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "40"))
         self.chunk_batch_size = chunk_count
 
-        if self.runtime_mode == "provider_runtime":
-            provider_runtime_cfg = ProviderRuntimeConfig.from_env(
-                default_validator_id=self.wallet.hotkey.ss58_address
-            )
-            self.dataset_cfg = provider_runtime_cfg.public_summary()
-            self.provider = ProviderRuntimeDatasetProvider(
-                provider_runtime_cfg,
-                wallet=self.wallet,
-            )
-            bt.logging.info(
-                "🎯 Using provider runtime dataset provider | "
-                f"api={provider_runtime_cfg.api_base_url} "
-                f"validator_id={provider_runtime_cfg.validator_id}"
-            )
-            configured_poll_interval = getattr(cfg, "poll_interval_seconds", 30)
-        else:
-            human_json_env = os.getenv("POKER44_HUMAN_JSON_PATH")
-            if not human_json_env:
-                raise RuntimeError(
-                    "POKER44_HUMAN_JSON_PATH must point to the local human-hand JSON used by validators."
-                )
-
-            human_json_path = Path(human_json_env).expanduser().resolve()
-            mixed_output_path = Path(
-                os.getenv("POKER44_MIXED_DATASET_PATH", str(DEFAULT_OUTPUT_PATH))
-            ).expanduser().resolve()
-            min_hands_per_chunk = int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))
-            max_hands_per_chunk = int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))
-            human_ratio = float(os.getenv("POKER44_HUMAN_RATIO", "0.5"))
-            dataset_seed_env = os.getenv("POKER44_DATASET_SEED")
-            dataset_seed = int(dataset_seed_env) if dataset_seed_env is not None else None
-            self.dataset_cfg = MixedDatasetConfig(
-                human_json_path=human_json_path,
-                output_path=mixed_output_path,
-                chunk_count=chunk_count,
-                min_hands_per_chunk=min_hands_per_chunk,
-                max_hands_per_chunk=max_hands_per_chunk,
-                human_ratio=human_ratio,
-                refresh_seconds=refresh_seconds,
-                seed=dataset_seed,
-            )
-            self.provider = TimedMixedDatasetProvider(self.dataset_cfg)
-            bt.logging.info(
-                f"📁 Using mixed dataset provider | human_json={human_json_path} output={mixed_output_path} "
-                f"chunks={chunk_count} hands_range=[{min_hands_per_chunk},{max_hands_per_chunk}] "
-                f"ratio={human_ratio} refresh_s={refresh_seconds}"
-            )
-            bt.logging.info("🧭 Dataset generation is deterministic per refresh window.")
-            configured_poll_interval = getattr(cfg, "poll_interval_seconds", refresh_seconds)
+        provider_runtime_cfg = ProviderRuntimeConfig.from_env(
+            default_validator_id=self.wallet.hotkey.ss58_address
+        )
+        self.dataset_cfg = provider_runtime_cfg.public_summary()
+        self.provider = ProviderRuntimeDatasetProvider(
+            provider_runtime_cfg,
+            wallet=self.wallet,
+        )
+        bt.logging.info(
+            "🎯 Using provider runtime dataset provider | "
+            f"api={provider_runtime_cfg.api_base_url} "
+            f"validator_id={provider_runtime_cfg.validator_id}"
+        )
+        configured_poll_interval = getattr(cfg, "poll_interval_seconds", 30)
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )

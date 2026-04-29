@@ -53,8 +53,7 @@ for daily competition:
 - a daily competition view built on the canonical eval feed and the latest
   signed subnet snapshot.
 
-The old local `mixed_dataset` validator path still exists in code, but it is no longer the target
-production operating model.
+The validator production path is now the central `provider_runtime` model.
 
 ---
 
@@ -99,27 +98,14 @@ See:
 
 ## Data Model Boundary
 
-### Production evaluation
-
 Production validators now target:
 
 - live hands from Poker44 benchmark tables;
 - SQL-persisted events and hand results;
 - centralized sanitized batch generation through `/internal/eval/*`.
 
-### Public benchmark
-
-The repo still includes a public benchmark/training path for miner development.
-
-That public benchmark is:
-
-- useful for local training and offline testing;
-- aligned with the sanitized schema;
-- **not** a mirror of the live production evaluation stream.
-
-See:
-
-- [Public benchmark + W&B](docs/public-benchmark.md)
+The repo may still include reference tooling for miner development, but production evaluation is
+driven by the central platform runtime and should not be inferred from local helper artifacts.
 
 ---
 
@@ -160,7 +146,6 @@ Then follow:
 
 - [Validator setup](docs/validator.md)
 - [Miner setup](docs/miner.md)
-- [Public benchmark + W&B](docs/public-benchmark.md)
 
 Validated current production-like validator profile:
 

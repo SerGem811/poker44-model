@@ -14,8 +14,7 @@ That means:
 - validators consume canonical evaluation batches from the central Poker44 eval API;
 - validators query miners, compute rewards, and set weights on-chain.
 
-The old `mixed_dataset` mode still exists in code for compatibility and local experimentation,
-but it is no longer the target production operating path.
+The validator production path is now `provider_runtime` only.
 
 ## Separation of Responsibilities
 
@@ -196,16 +195,9 @@ btcli wallet overview --wallet.name p44_cold --subtensor.network finney
 
 ## Runtime Modes
 
-### Production target
-
 - `POKER44_RUNTIME_MODE=provider_runtime`
 
-### Legacy compatibility mode
-
-- `POKER44_RUNTIME_MODE=mixed_dataset`
-
-`mixed_dataset` still exists for compatibility, but production validators should be treated as
-`provider_runtime` consumers of central eval data.
+The validator now runs only in `provider_runtime` and consumes central eval data.
 
 ## Required Environment
 
@@ -312,5 +304,4 @@ pm2 delete poker44_validator
 ## Related Docs
 
 - [Miner guide](./miner.md)
-- [Public benchmark](./public-benchmark.md)
 - [Anti-leakage policy](./anti-leakage.md)

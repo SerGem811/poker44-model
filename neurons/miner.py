@@ -84,18 +84,9 @@ class Miner(BaseMinerNeuron):
             f"inference_mode={self.model_manifest.get('inference_mode', '')}"
         )
         bt.logging.info(
-            "Miner prep tooling available | "
-            f"benchmark_doc={repo_root / 'docs' / 'public-benchmark.md'} "
+            "Miner prep docs available | "
             f"miner_doc={repo_root / 'docs' / 'miner.md'} "
             f"anti_leakage_doc={repo_root / 'docs' / 'anti-leakage.md'}"
-        )
-        bt.logging.info(
-            "Public benchmark command: "
-            "python scripts/publish/publish_public_benchmark.py --skip-wandb"
-        )
-        bt.logging.info(
-            "Purpose: train, validate and refine miner models against the public benchmark "
-            "while Poker44 moves toward more dynamic evaluation."
         )
 
     async def forward(self, synapse: DetectionSynapse) -> DetectionSynapse:

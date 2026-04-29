@@ -228,15 +228,9 @@ Minimum fields for `transparent` compliance:
 The validator still scores your `risk_scores`; the manifest is for transparency and
 anti-leakage tracking.
 
-## Public Benchmark vs Production Evaluation
+## Production Evaluation Boundary
 
-The public benchmark is still useful for:
-
-- local training
-- schema familiarization
-- offline testing
-
-But it is **not** the same as production evaluation.
+Production evaluation is not derived from local helper artifacts.
 
 Production validators now target:
 
@@ -244,11 +238,8 @@ Production validators now target:
 - centralized SQL persistence
 - sanitizer-built batches served by the eval API
 
-The public benchmark remains a reference artifact, not a mirror of the live evaluation stream.
-
-See:
-
-- [Public benchmark + W&B](./public-benchmark.md)
+Miners should optimize against the live contract and the current chunk-level scoring path, not
+against assumptions about any local reference corpus.
 
 ## PM2
 
