@@ -4,14 +4,14 @@ Production-facing miner guide for Poker44 subnet `126`.
 
 ## What Miners Are Solving Today
 
-Poker44 validators currently evaluate miners with sanitized behavioral payloads derived from
+Poker44 validators currently evaluate miners with behavioral payloads derived from
 live Poker44 benchmark tables.
 
 Current production path:
 
 1. live benchmark tables run on Poker44 platform infrastructure;
 2. those hands are persisted in platform SQL;
-3. `poker44-platform-backend` builds sanitized labeled evaluation batches from those hands;
+3. `poker44-platform-backend` builds labeled evaluation batches from those hands;
 4. the validator fetches the active batch set through `/internal/eval/current`;
 5. the validator sends those batches to miners through `DetectionSynapse`;
 6. miners return one risk score per received chunk;
@@ -26,8 +26,8 @@ Miners receive `DetectionSynapse(chunks=...)`.
 Current semantics:
 
 - `chunks` is a list of chunks;
-- each chunk is a list of sanitized hand payloads;
-- each chunk may contain one or many sanitized hands;
+- each chunk is a list of hand payloads;
+- each chunk may contain one or many hands;
 - the validator expects exactly one `risk_score` per chunk.
 
 So today the practical task is:
@@ -54,7 +54,7 @@ together.
 
 But the chunk format delivered to miners is still aligned with the current scoring path:
 
-- the backend builds labeled batches from sanitized benchmark-table hands;
+- the backend builds labeled batches from benchmark-table hands;
 - the validator groups those batches into `DetectionSynapse(chunks=...)`;
 - miners return one score per batch/chunk.
 
@@ -67,25 +67,19 @@ So:
 Do not build your miner assuming this exact granularity will never evolve, but document and
 optimize against the contract that is live today: one score per received chunk.
 
-## Sanitized Payload Boundary
+## Payload Shape
 
-The payload sent to miners is sanitized before inference.
+The payload sent to miners is a backend-prepared evaluation payload.
 
-Current provider-runtime sanitization includes:
+The miner-visible hand structure includes:
 
 - `metadata`
 - `players`
 - `streets`
 - `actions`
 - `outcome`
-- no direct identity fields
-- no explicit ground-truth label
 
-Recent hardening removed the most obvious timing leakage from the miner-visible payload.
-
-See:
-
-- [Anti-Leakage Policy](./anti-leakage.md)
+Important: the miner does not receive explicit ground-truth labels.
 
 ## Expected Miner Output
 
@@ -226,7 +220,7 @@ Minimum fields for `transparent` compliance:
 - `data_attestation`
 
 The validator still scores your `risk_scores`; the manifest is for transparency and
-anti-leakage tracking.
+runtime tracking.
 
 ## Production Evaluation Boundary
 
@@ -236,7 +230,7 @@ Production validators now target:
 
 - live hands generated on Poker44 platform tables
 - centralized SQL persistence
-- sanitizer-built batches served by the eval API
+- batches served by the eval API
 
 Miners should optimize against the live contract and the current chunk-level scoring path, not
 against assumptions about any local reference corpus.

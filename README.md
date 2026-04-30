@@ -4,7 +4,6 @@
   <p>
     <a href="docs/validator.md">🔐 Validator Guide</a> &bull;
     <a href="docs/miner.md">🛠️ Miner Guide</a> &bull;
-    <a href="docs/anti-leakage.md">🛡️ Anti-Leakage</a> &bull;
     <a href="docs/roadmap.md">🗺️ Roadmap</a>
   </p>
 </div>
@@ -24,7 +23,7 @@
 Poker44 is a Bittensor subnet focused on one problem: detecting bots in online poker with
 objective, reproducible evaluation.
 
-Validators query miners with sanitized poker-behavior payloads, score predictions, and publish
+Validators query miners with poker-behavior chunk payloads, score predictions, and publish
 weights on-chain. Miners compete by returning robust bot-risk predictions that generalize to
 evolving live-table behavior.
 
@@ -39,13 +38,13 @@ The current production direction is:
 - live benchmark tables run on Poker44 platform infrastructure;
 - those tables include both human and bot seats;
 - hands are persisted to central platform SQL;
-- `poker44-platform-backend` builds sanitized evaluation batches from those benchmark-table hands;
+- `poker44-platform-backend` builds evaluation batches from those benchmark-table hands;
 - validators do **not** run their own tables;
 - validators fetch the active canonical batch set through the central eval API;
 - validators send those batches to miners, compute rewards, and set weights.
 
-On top of that, `dev` now also carries the public observability layer needed
-for daily competition:
+On top of that, the current production path also carries the public
+observability layer needed for daily competition:
 
 - signed validator runtime snapshots;
 - signed metagraph-backed network snapshots;
@@ -64,9 +63,9 @@ Miners receive `DetectionSynapse(chunks=...)`.
 Current semantics:
 
 - `chunks` is a list of chunks;
-- each chunk is a list of sanitized hand payloads;
+- each chunk is a list of hand payloads;
 - validators expect one `risk_score` per chunk;
-- each chunk may contain one or many sanitized hands.
+- each chunk may contain one or many hands.
 
 This means:
 
@@ -74,14 +73,14 @@ This means:
 - each individual chunk is homogeneous, so the hands inside a chunk are all human or all bot;
 - miners should treat each chunk as one scoring unit, regardless of how many hands it contains.
 
-The competition framing in `dev` should be understood as:
+The competition framing should be understood as:
 
 - daily epoch as the public competition unit;
 - continuous evaluation on canonical live batches during that epoch;
 - public provisional leaderboard derived from the signed subnet snapshot;
 - target settlement model: winner-take-all.
 
-In the current `dev` runtime, validators read the canonical competition weight
+In the current runtime, validators read the canonical competition weight
 vector from the backend. Once the backend has settled at least one daily
 winner, that latest settled winner becomes the active on-chain competitive
 allocation for the current period: `97%` is burned to `uid 0`, and the
@@ -102,7 +101,7 @@ Production validators now target:
 
 - live hands from Poker44 benchmark tables;
 - SQL-persisted events and hand results;
-- centralized sanitized batch generation through `/internal/eval/*`.
+- centralized batch generation through `/internal/eval/*`.
 
 The repo may still include reference tooling for miner development, but production evaluation is
 driven by the central platform runtime and should not be inferred from local helper artifacts.
@@ -118,7 +117,7 @@ This does not change validator scoring or on-chain `set_weights`. It adds:
 - traceability
 - training-data disclosure
 - transparency metadata
-- anti-leakage observability
+- evaluation observability
 
 Recommended manifest fields include:
 
@@ -161,7 +160,6 @@ Validated current production-like validator profile:
 
 - Validator docs: [`docs/validator.md`](docs/validator.md)
 - Miner docs: [`docs/miner.md`](docs/miner.md)
-- Anti-leakage policy: [`docs/anti-leakage.md`](docs/anti-leakage.md)
 - Open-sourced roadmap: [`docs/opensourced_roadmap.md`](docs/opensourced_roadmap.md)
 - Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
 

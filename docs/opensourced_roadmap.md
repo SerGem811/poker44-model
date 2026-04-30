@@ -1,7 +1,7 @@
 # Open-Sourced Roadmap
 
 Roadmap and implementation notes for Poker44's transition toward open-source miner models,
-anti-leakage controls, and future compliance-based enforcement.
+evaluation-integrity controls, and future compliance-based enforcement.
 
 ## Objective
 
@@ -21,7 +21,7 @@ Open source is not treated as full proof of honesty. It is the first layer of:
 
 Poker44 currently evaluates miners through remote inference:
 
-1. Poker44 platform builds sanitized evaluation batches from live table hands
+1. Poker44 platform builds evaluation batches from live table hands
 2. validator fetches the active canonical batch set
 3. validator sends chunks to miners
 4. miners return `risk_scores`
@@ -88,7 +88,7 @@ Generated registry:
 
 - `model_manifests.json`
 
-### 4. Anti-leakage tracking on validator side
+### 4. Evaluation-integrity tracking on validator side
 
 Validator now also persists:
 
@@ -114,7 +114,6 @@ Relevant docs:
 
 - `docs/miner.md`
 - `docs/validator.md`
-- `docs/anti-leakage.md`
 - `README.md`
 
 ## Current Compliance Standard
@@ -231,14 +230,14 @@ Important:
 - publish the policy before activating it
 - give miners time to comply
 
-## Anti-Leakage Position
+## Evaluation-Integrity Position
 
 Correct claim:
 
 - open source improves transparency and auditability
 - it does not by itself prove miners are honest
 
-Real defense against leakage requires:
+Real defense against benchmark abuse requires:
 
 - validator/live evaluation boundaries
 - rotating live evaluation windows
@@ -303,7 +302,6 @@ Useful public links:
 
 - `https://github.com/Poker44/Poker44-subnet/blob/main/docs/miner.md`
 - `https://github.com/Poker44/Poker44-subnet/blob/main/docs/validator.md`
-- `https://github.com/Poker44/Poker44-subnet/blob/main/docs/anti-leakage.md`
 - `https://github.com/Poker44/Poker44-subnet/blob/main/docs/opensourced_roadmap.md`
 
 Preferred title style while validators are not yet deployed:

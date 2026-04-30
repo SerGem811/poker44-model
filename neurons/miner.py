@@ -85,8 +85,7 @@ class Miner(BaseMinerNeuron):
         )
         bt.logging.info(
             "Miner prep docs available | "
-            f"miner_doc={repo_root / 'docs' / 'miner.md'} "
-            f"anti_leakage_doc={repo_root / 'docs' / 'anti-leakage.md'}"
+            f"miner_doc={repo_root / 'docs' / 'miner.md'}"
         )
 
     async def forward(self, synapse: DetectionSynapse) -> DetectionSynapse:
