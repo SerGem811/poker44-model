@@ -4,7 +4,7 @@
   <p>
     <a href="docs/validator.md">🔐 Validator Guide</a> &bull;
     <a href="docs/miner.md">🛠️ Miner Guide</a> &bull;
-    <a href="docs/roadmap.md">🗺️ Roadmap</a>
+    <a href="https://poker44.net">🌐 Platform</a>
   </p>
 </div>
 
@@ -160,8 +160,6 @@ Validated current production-like validator profile:
 
 - Validator docs: [`docs/validator.md`](docs/validator.md)
 - Miner docs: [`docs/miner.md`](docs/miner.md)
-- Open-sourced roadmap: [`docs/opensourced_roadmap.md`](docs/opensourced_roadmap.md)
-- Roadmap: [`docs/roadmap.md`](docs/roadmap.md)
 
 ---
 
