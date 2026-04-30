@@ -23,7 +23,7 @@ from poker44.validator.integrity import (
     update_suspicion_registry,
 )
 from poker44.validator.synapse import DetectionSynapse
-from poker44.validator.sanitization import prepare_hand_for_miner
+from poker44.validator.payload_view import prepare_hand_for_miner
 
 from poker44.validator.constants import (
     BURN_EMISSIONS,
@@ -456,7 +456,7 @@ def _record_suspicion(
     if event is None:
         return
 
-    bt.logging.warning(f"Miner {uid} anti-leakage suspicion flags: {', '.join(reasons)}")
+    bt.logging.warning(f"Miner {uid} integrity suspicion flags: {', '.join(reasons)}")
     persist_json_registry(getattr(validator, "suspicion_registry_path", None), registry)
 
 

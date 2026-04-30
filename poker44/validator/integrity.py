@@ -1,4 +1,4 @@
-"""Integrity helpers for validator-side anti-leakage tracking."""
+"""Integrity helpers for validator-side evaluation-integrity tracking."""
 
 from __future__ import annotations
 

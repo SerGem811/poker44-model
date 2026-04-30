@@ -1,6 +1,6 @@
 import unittest
 
-from poker44.validator.sanitization import prepare_hand_for_miner
+from poker44.validator.payload_view import prepare_hand_for_miner
 
 
 class SanitizationFocusSeatTests(unittest.TestCase):

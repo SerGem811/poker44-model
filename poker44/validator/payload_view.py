@@ -13,9 +13,9 @@ _LEAKAGE_KEYS = {
 }
 _MINER_ACTION_WINDOW = 12
 _DEFAULT_MAX_SEATS = 6
-_SANITIZED_SB = 0.01
-_SANITIZED_BB = 0.02
-_SANITIZED_ANTE = 0.0
+_VISIBLE_SB = 0.01
+_VISIBLE_BB = 0.02
+_VISIBLE_ANTE = 0.0
 _MAX_NORMALIZED_STACK_BB = 500.0
 _MAX_NORMALIZED_ACTION_BB = 200.0
 _MAX_NORMALIZED_POT_BB = 1000.0
@@ -46,8 +46,8 @@ def _to_bb_units(value: Any, bb: float, *, upper: float) -> float:
     return _round_bounded(numeric / bb, upper=upper)
 
 
-def _from_bb_units(bb_value: float, *, sanitized_bb: float = _SANITIZED_BB) -> float:
-    return round(max(0.0, float(bb_value)) * sanitized_bb, 4)
+def _from_bb_units(bb_value: float, *, visible_bb: float = _VISIBLE_BB) -> float:
+    return round(max(0.0, float(bb_value)) * visible_bb, 4)
 
 
 def _sanitize_seat(value: Any, *, max_seats: int) -> int:
@@ -75,22 +75,22 @@ def _sanitize_action_type(value: Any) -> str:
     return "other"
 
 
-def strip_leakage_fields(value: Any) -> Any:
+def strip_private_fields(value: Any) -> Any:
     if isinstance(value, dict):
         cleaned: Dict[str, Any] = {}
         for key, item in value.items():
             if key in _LEAKAGE_KEYS:
                 continue
-            cleaned[key] = strip_leakage_fields(item)
+            cleaned[key] = strip_private_fields(item)
         return cleaned
     if isinstance(value, list):
-        return [strip_leakage_fields(item) for item in value]
+        return [strip_private_fields(item) for item in value]
     return value
 
 
-def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Keep behaviorally useful structure while suppressing direct identity leakage."""
-    cleaned = strip_leakage_fields(hand_payload)
+def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep behaviorally useful structure while suppressing direct identity fields."""
+    cleaned = strip_private_fields(hand_payload)
     if not isinstance(cleaned, dict):
         return {}
 
@@ -118,7 +118,7 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             upper=_MAX_NORMALIZED_STACK_BB,
         )
 
-    sanitized_players: List[Dict[str, Any]] = [
+    visible_players: List[Dict[str, Any]] = [
         {
             "player_uid": f"seat_{seat_i}",
             "seat": seat_i,
@@ -173,7 +173,7 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
 
-    sanitized_actions: List[Dict[str, Any]] = []
+    visible_actions: List[Dict[str, Any]] = []
     if raw_actions:
         last_idx = len(raw_actions) - 1
         if len(raw_actions) == 1:
@@ -183,9 +183,9 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
                 int(round(i * last_idx / (_MINER_ACTION_WINDOW - 1)))
                 for i in range(_MINER_ACTION_WINDOW)
             ]
-        sanitized_actions = [dict(raw_actions[i]) for i in indices]
+        visible_actions = [dict(raw_actions[i]) for i in indices]
 
-    for idx, action in enumerate(sanitized_actions, start=1):
+    for idx, action in enumerate(visible_actions, start=1):
         action["action_id"] = str(idx)
 
     return {
@@ -196,12 +196,12 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             "hero_seat": _sanitize_seat(metadata.get("hero_seat"), max_seats=max_seats),
             "hand_ended_on_street": "",
             "button_seat": 0,
-            "sb": _SANITIZED_SB,
-            "bb": _SANITIZED_BB,
-            "ante": _SANITIZED_ANTE,
+            "sb": _VISIBLE_SB,
+            "bb": _VISIBLE_BB,
+            "ante": _VISIBLE_ANTE,
             "rng_seed_commitment": None,
         },
-        "players": sanitized_players,
+        "players": visible_players,
         "streets": [
             {
                 "street": str(street.get("street", "")),
@@ -210,7 +210,7 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             for street in (cleaned.get("streets") or [])
             if isinstance(street, dict)
         ],
-        "actions": sanitized_actions,
+        "actions": visible_actions,
         "outcome": {
             "winners": [],
             "payouts": {},
@@ -223,21 +223,21 @@ def sanitize_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def prepare_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Preserve already-sanitized eval payloads, otherwise sanitize canonical hands."""
+    """Preserve backend-prepared eval payloads, otherwise normalize canonical hands."""
     schema = str(hand_payload.get("schema") or "").strip().lower()
     if schema.startswith("poker44_eval_hand_v"):
-        return strip_leakage_fields(hand_payload)
-    return sanitize_hand_for_miner(hand_payload)
+        return strip_private_fields(hand_payload)
+    return build_miner_payload_hand(hand_payload)
 
 
-def sanitized_chunk_signature(
+def payload_chunk_signature(
     hands: List[Dict[str, Any]],
 ) -> Tuple[float, float, float, float, float, float, float, float, float]:
-    """Coarse miner-visible behavior signature for shortcut analysis and chunk matching."""
+    """Coarse miner-visible behavior signature for chunk analysis and matching."""
     if not hands:
         return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
-    sanitized_hands = [sanitize_hand_for_miner(hand) for hand in hands]
+    visible_hands = [build_miner_payload_hand(hand) for hand in hands]
     total_calls = 0
     total_checks = 0
     total_raises = 0
@@ -247,7 +247,7 @@ def sanitized_chunk_signature(
     total_players = 0
     total_action_amount = 0.0
     total_action_pot_after = 0.0
-    for hand in sanitized_hands:
+    for hand in visible_hands:
         players = hand.get("players") or []
         actions = hand.get("actions") or []
         total_players += len(players)
@@ -266,7 +266,7 @@ def sanitized_chunk_signature(
                 total_folds += 1
         total_streets += len(hand.get("streets") or [])
 
-    n = float(len(sanitized_hands))
+    n = float(len(visible_hands))
     return (
         total_calls / n,
         total_checks / n,
