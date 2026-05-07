@@ -231,6 +231,12 @@ Minimum fields for `transparent` compliance:
 The validator still scores your `risk_scores`; the manifest is for transparency and
 runtime tracking.
 
+Important:
+
+- once a model reaches a sufficiently high score, its published manifest may be reviewed more deeply;
+- the published repository and commit must make the full model flow publicly visible and verifiable;
+- if the published repo/commit does not match the logic behind the observed performance, the model may be disqualified or reduced to a score of `0`.
+
 ## Production Evaluation Boundary
 
 Production evaluation is not derived from local helper artifacts.
