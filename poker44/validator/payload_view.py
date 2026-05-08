@@ -72,7 +72,30 @@ def _sanitize_action_type(value: Any) -> str:
         return "check"
     if "fold" in action_type or action_type == "muck":
         return "fold"
-    return "other"
+    return ""
+
+
+def _resolve_action_type(
+    value: Any,
+    *,
+    amount_bb: float,
+    raise_to_bb: float,
+    call_to_bb: float,
+    pot_before_bb: float,
+    pot_after_bb: float,
+) -> str:
+    direct = _sanitize_action_type(value)
+    if direct:
+        return direct
+    if raise_to_bb > 0:
+        return "raise"
+    if call_to_bb > 0:
+        return "call"
+    if amount_bb > 0:
+        return "bet" if pot_after_bb > pot_before_bb else "call"
+    if pot_after_bb <= pot_before_bb:
+        return "check"
+    return "call"
 
 
 def strip_private_fields(value: Any) -> Any:
@@ -158,12 +181,31 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             source_bb,
             upper=_MAX_NORMALIZED_POT_BB,
         )
+        direct_action_type = _sanitize_action_type(action.get("action_type"))
+        action_type = direct_action_type or _resolve_action_type(
+            action.get("action_type"),
+            amount_bb=amount_bb,
+            raise_to_bb=raise_to_bb,
+            call_to_bb=call_to_bb,
+            pot_before_bb=pot_before_bb,
+            pot_after_bb=pot_after_bb,
+        )
+        if direct_action_type == "" and (
+            not action_type
+            or (
+                amount_bb <= 0
+                and raise_to_bb <= 0
+                and call_to_bb <= 0
+                and pot_after_bb <= pot_before_bb
+            )
+        ):
+            continue
         raw_actions.append(
             {
                 "action_id": "",
                 "street": str(action.get("street", "")),
                 "actor_seat": _sanitize_seat(action.get("actor_seat"), max_seats=max_seats),
-                "action_type": _sanitize_action_type(action.get("action_type")),
+                "action_type": action_type,
                 "amount": _from_bb_units(amount_bb),
                 "raise_to": None if raise_to_bb <= 0 else _from_bb_units(raise_to_bb),
                 "call_to": None if call_to_bb <= 0 else _from_bb_units(call_to_bb),
@@ -223,10 +265,7 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def prepare_hand_for_miner(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Preserve backend-prepared eval payloads, otherwise normalize canonical hands."""
-    schema = str(hand_payload.get("schema") or "").strip().lower()
-    if schema.startswith("poker44_eval_hand_v"):
-        return strip_private_fields(hand_payload)
+    """Project all hands through the same miner-visible canonicalizer."""
     return build_miner_payload_hand(hand_payload)
 
 

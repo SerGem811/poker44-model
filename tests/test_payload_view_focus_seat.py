@@ -63,6 +63,59 @@ class SanitizationFocusSeatTests(unittest.TestCase):
 
         self.assertEqual(prepared["metadata"]["hero_seat"], 2)
 
+    def test_canonicalizes_eval_hands_and_drops_noop_other_actions(self):
+        payload = {
+            "schema": "poker44_eval_hand_v1",
+            "label": "bot",
+            "metadata": {
+                "game_type": "Hold'em",
+                "limit_type": "No Limit",
+                "max_seats": 2,
+                "hero_seat": 1,
+                "button_seat": 2,
+                "bb": 0.02,
+            },
+            "players": [
+                {"player_uid": "seat_1", "seat": 1, "starting_stack": 8.0},
+                {"player_uid": "seat_2", "seat": 2, "starting_stack": 8.0},
+            ],
+            "streets": [],
+            "actions": [
+                {
+                    "action_id": "1",
+                    "street": "preflop",
+                    "actor_seat": 1,
+                    "action_type": "other",
+                    "amount": 0.0,
+                    "raise_to": None,
+                    "call_to": None,
+                    "normalized_amount_bb": 0.0,
+                    "pot_before": 0.1,
+                    "pot_after": 0.1,
+                },
+                {
+                    "action_id": "2",
+                    "street": "preflop",
+                    "actor_seat": 2,
+                    "action_type": "other",
+                    "amount": 0.1,
+                    "raise_to": None,
+                    "call_to": 0.1,
+                    "normalized_amount_bb": 5.0,
+                    "pot_before": 0.1,
+                    "pot_after": 0.2,
+                },
+            ],
+            "outcome": {"showdown": False},
+        }
+
+        prepared = prepare_hand_for_miner(payload)
+
+        self.assertNotIn("label", prepared)
+        self.assertEqual(len(prepared["actions"]), 12)
+        self.assertEqual(prepared["actions"][0]["action_type"], "call")
+        self.assertTrue(all(action["action_type"] != "other" for action in prepared["actions"]))
+
 
 if __name__ == "__main__":
     unittest.main()
