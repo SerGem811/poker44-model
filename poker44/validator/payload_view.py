@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, List, Tuple
 
 _LEAKAGE_KEYS = {
@@ -12,6 +13,8 @@ _LEAKAGE_KEYS = {
     "bot_version",
 }
 _MINER_ACTION_WINDOW = 12
+_MINER_ACTION_WINDOW_MIN = 8
+_MINER_ACTION_WINDOW_MAX = 14
 _DEFAULT_MAX_SEATS = 6
 _VISIBLE_SB = 0.01
 _VISIBLE_BB = 0.02
@@ -109,6 +112,13 @@ def strip_private_fields(value: Any) -> Any:
     if isinstance(value, list):
         return [strip_private_fields(item) for item in value]
     return value
+
+
+def _deterministic_window_size(seed_parts: List[str]) -> int:
+    seed = "|".join(seed_parts).encode("utf-8", errors="ignore")
+    digest = hashlib.sha256(seed).digest()
+    span = _MINER_ACTION_WINDOW_MAX - _MINER_ACTION_WINDOW_MIN + 1
+    return _MINER_ACTION_WINDOW_MIN + (digest[0] % span)
 
 
 def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -219,11 +229,23 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
     if raw_actions:
         last_idx = len(raw_actions) - 1
         if len(raw_actions) == 1:
-            indices = [0] * _MINER_ACTION_WINDOW
+            window_size = _MINER_ACTION_WINDOW
+            indices = [0] * window_size
         else:
+            window_size = min(
+                len(raw_actions),
+                _deterministic_window_size(
+                    [
+                        str(metadata.get("hero_seat", "")),
+                        str(metadata.get("max_seats", "")),
+                        str(raw_actions[0].get("street", "")),
+                        str(len(raw_actions)),
+                    ]
+                ),
+            )
             indices = [
-                int(round(i * last_idx / (_MINER_ACTION_WINDOW - 1)))
-                for i in range(_MINER_ACTION_WINDOW)
+                int(round(i * last_idx / max(1, window_size - 1)))
+                for i in range(window_size)
             ]
         visible_actions = [dict(raw_actions[i]) for i in indices]
 
