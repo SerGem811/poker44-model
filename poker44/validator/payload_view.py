@@ -13,8 +13,8 @@ _LEAKAGE_KEYS = {
     "bot_version",
 }
 _MINER_ACTION_WINDOW = 12
-_MINER_ACTION_WINDOW_MIN = 6
-_MINER_ACTION_WINDOW_MAX = 10
+_MINER_ACTION_WINDOW_MIN = 5
+_MINER_ACTION_WINDOW_MAX = 8
 _DEFAULT_MAX_SEATS = 6
 _VISIBLE_SB = 0.01
 _VISIBLE_BB = 0.02
@@ -22,6 +22,24 @@ _VISIBLE_ANTE = 0.0
 _MAX_NORMALIZED_STACK_BB = 500.0
 _MAX_NORMALIZED_ACTION_BB = 200.0
 _MAX_NORMALIZED_POT_BB = 1000.0
+_VISIBLE_BB_BUCKETS = (
+    0.0,
+    0.5,
+    1.0,
+    1.5,
+    2.0,
+    3.0,
+    4.0,
+    6.0,
+    8.0,
+    12.0,
+    16.0,
+    24.0,
+    36.0,
+    56.0,
+    84.0,
+    126.0,
+)
 _ALLOWED_ACTION_TYPES = {
     "small_blind",
     "big_blind",
@@ -78,6 +96,51 @@ def _sanitize_action_type(value: Any) -> str:
     return ""
 
 
+def _stable_bucket_noise(seed_parts: List[str]) -> float:
+    digest = hashlib.sha256("|".join(seed_parts).encode("utf-8", errors="ignore")).digest()
+    return ((digest[1] / 255.0) * 2.0) - 1.0
+
+
+def _coarse_bb_value(bb_value: float, *, seed_parts: List[str]) -> float:
+    value = max(0.0, float(bb_value))
+    if value <= 0:
+        return 0.0
+    nearest = min(_VISIBLE_BB_BUCKETS[1:], key=lambda bucket: abs(bucket - value))
+    noise = _stable_bucket_noise(seed_parts)
+    if nearest <= 1.5:
+        adjusted = nearest + noise * 0.08
+    elif nearest <= 8.0:
+        adjusted = nearest + noise * 0.22
+    else:
+        adjusted = nearest + noise * max(0.35, nearest * 0.05)
+    return round(max(0.0, min(_VISIBLE_BB_BUCKETS[-1], adjusted)), 2)
+
+
+def _build_seat_alias_map(
+    players_raw: List[Dict[str, Any]],
+    actions_raw: List[Dict[str, Any]],
+    *,
+    max_seats: int,
+) -> Dict[int, int]:
+    seat_order: List[int] = []
+
+    def _push(raw: Any) -> None:
+        seat = _sanitize_seat(raw, max_seats=max_seats)
+        if seat > 0 and seat not in seat_order:
+            seat_order.append(seat)
+
+    for action in actions_raw:
+        if isinstance(action, dict):
+            _push(action.get("actor_seat"))
+    for player in players_raw:
+        if isinstance(player, dict):
+            _push(player.get("seat"))
+    for seat in range(1, max_seats + 1):
+        _push(seat)
+
+    return {seat: idx + 1 for idx, seat in enumerate(seat_order)}
+
+
 def _resolve_action_type(
     value: Any,
     *,
@@ -121,6 +184,22 @@ def _deterministic_window_size(seed_parts: List[str]) -> int:
     return _MINER_ACTION_WINDOW_MIN + (digest[0] % span)
 
 
+def _sample_visible_indices(total: int, *, window_size: int, seed_parts: List[str]) -> List[int]:
+    if total <= 1:
+        return [0] * max(1, window_size)
+    if total <= window_size:
+        return list(range(total))
+
+    middle = list(range(1, total - 1))
+    seed = "|".join(seed_parts).encode("utf-8", errors="ignore")
+
+    def _sort_key(index: int) -> bytes:
+        return hashlib.sha256(seed + f":{index}".encode("utf-8")).digest()
+
+    picked = sorted(middle, key=_sort_key)[: max(0, window_size - 2)]
+    return sorted([0, total - 1, *picked])
+
+
 def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
     """Keep behaviorally useful structure while suppressing direct identity fields."""
     cleaned = strip_private_fields(hand_payload)
@@ -137,6 +216,8 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
         _sanitize_seat(metadata.get("max_seats"), max_seats=10),
     )
     source_bb = float(metadata.get("bb", 0.0) or 0.0)
+    seat_alias_map = _build_seat_alias_map(players_raw, actions_raw, max_seats=max_seats)
+    alias_max_seats = max(2, len(seat_alias_map))
 
     seat_to_stack_bb: Dict[int, float] = {}
     for player in players_raw:
@@ -145,7 +226,7 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
         seat_i = _sanitize_seat(player.get("seat"), max_seats=max_seats)
         if seat_i == 0:
             continue
-        seat_to_stack_bb[seat_i] = _to_bb_units(
+        seat_to_stack_bb[seat_alias_map.get(seat_i, seat_i)] = _to_bb_units(
             player.get("starting_stack", 0.0),
             source_bb,
             upper=_MAX_NORMALIZED_STACK_BB,
@@ -166,30 +247,48 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
     for action in actions_raw:
         if not isinstance(action, dict):
             continue
-        amount_bb = _to_bb_units(
+        amount_bb_raw = _to_bb_units(
             action.get("amount", 0.0),
             source_bb,
             upper=_MAX_NORMALIZED_ACTION_BB,
         )
-        raise_to_bb = _to_bb_units(
+        raise_to_bb_raw = _to_bb_units(
             action.get("raise_to"),
             source_bb,
             upper=_MAX_NORMALIZED_POT_BB,
         )
-        call_to_bb = _to_bb_units(
+        call_to_bb_raw = _to_bb_units(
             action.get("call_to"),
             source_bb,
             upper=_MAX_NORMALIZED_POT_BB,
         )
-        pot_before_bb = _to_bb_units(
+        pot_before_bb_raw = _to_bb_units(
             action.get("pot_before", 0.0),
             source_bb,
             upper=_MAX_NORMALIZED_POT_BB,
         )
-        pot_after_bb = _to_bb_units(
+        pot_after_bb_raw = _to_bb_units(
             action.get("pot_after", 0.0),
             source_bb,
             upper=_MAX_NORMALIZED_POT_BB,
+        )
+        seed_base = [
+            str(metadata.get("hero_seat", "")),
+            str(metadata.get("max_seats", "")),
+            str(action.get("street", "")),
+            str(action.get("actor_seat", "")),
+            str(action.get("action_id", "")),
+        ]
+        amount_bb = _coarse_bb_value(amount_bb_raw, seed_parts=[*seed_base, "amount"])
+        raise_to_bb = _coarse_bb_value(raise_to_bb_raw, seed_parts=[*seed_base, "raise_to"])
+        call_to_bb = _coarse_bb_value(call_to_bb_raw, seed_parts=[*seed_base, "call_to"])
+        pot_before_bb = _coarse_bb_value(
+            pot_before_bb_raw,
+            seed_parts=[*seed_base, "pot_before"],
+        )
+        pot_after_bb = _coarse_bb_value(
+            max(pot_before_bb, pot_after_bb_raw),
+            seed_parts=[*seed_base, "pot_after"],
         )
         direct_action_type = _sanitize_action_type(action.get("action_type"))
         action_type = direct_action_type or _resolve_action_type(
@@ -214,7 +313,10 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             {
                 "action_id": "",
                 "street": str(action.get("street", "")),
-                "actor_seat": _sanitize_seat(action.get("actor_seat"), max_seats=max_seats),
+                "actor_seat": seat_alias_map.get(
+                    _sanitize_seat(action.get("actor_seat"), max_seats=max_seats),
+                    0,
+                ),
                 "action_type": action_type,
                 "amount": _from_bb_units(amount_bb),
                 "raise_to": None if raise_to_bb <= 0 else _from_bb_units(raise_to_bb),
@@ -243,10 +345,16 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
                     ]
                 ),
             )
-            indices = [
-                int(round(i * last_idx / max(1, window_size - 1)))
-                for i in range(window_size)
-            ]
+            indices = _sample_visible_indices(
+                len(raw_actions),
+                window_size=window_size,
+                seed_parts=[
+                    str(metadata.get("hero_seat", "")),
+                    str(metadata.get("max_seats", "")),
+                    str(raw_actions[0].get("street", "")),
+                    str(len(raw_actions)),
+                ],
+            )
         visible_actions = [dict(raw_actions[i]) for i in indices]
 
     for idx, action in enumerate(visible_actions, start=1):
@@ -256,8 +364,11 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
         "metadata": {
             "game_type": str(metadata.get("game_type", "")),
             "limit_type": str(metadata.get("limit_type", "")),
-            "max_seats": max_seats,
-            "hero_seat": _sanitize_seat(metadata.get("hero_seat"), max_seats=max_seats),
+            "max_seats": alias_max_seats,
+            "hero_seat": seat_alias_map.get(
+                _sanitize_seat(metadata.get("hero_seat"), max_seats=max_seats),
+                0,
+            ),
             "hand_ended_on_street": "",
             "button_seat": 0,
             "sb": _VISIBLE_SB,
