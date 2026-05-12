@@ -184,20 +184,72 @@ def _deterministic_window_size(seed_parts: List[str]) -> int:
     return _MINER_ACTION_WINDOW_MIN + (digest[0] % span)
 
 
-def _sample_visible_indices(total: int, *, window_size: int, seed_parts: List[str]) -> List[int]:
+def _sample_visible_indices(
+    total: int,
+    *,
+    window_size: int,
+    seed_parts: List[str],
+    actions: Optional[List[Dict[str, Any]]] = None,
+) -> List[int]:
     if total <= 1:
         return [0] * max(1, window_size)
     if total <= window_size:
         return list(range(total))
 
-    middle = list(range(1, total - 1))
     seed = "|".join(seed_parts).encode("utf-8", errors="ignore")
 
-    def _sort_key(index: int) -> bytes:
-        return hashlib.sha256(seed + f":{index}".encode("utf-8")).digest()
+    def _sort_key(index: int, extra: str = "") -> bytes:
+        return hashlib.sha256(seed + f":{index}:{extra}".encode("utf-8")).digest()
 
-    picked = sorted(middle, key=_sort_key)[: max(0, window_size - 2)]
-    return sorted([0, total - 1, *picked])
+    picked = {0, total - 1}
+
+    if actions:
+        street_buckets: Dict[str, List[int]] = {}
+        for idx in range(1, total - 1):
+            action = actions[idx] if idx < len(actions) else {}
+            street = str(action.get("street", "") or "preflop").lower()
+            street_buckets.setdefault(street, []).append(idx)
+        for street in sorted(street_buckets.keys()):
+            if len(picked) >= window_size:
+                break
+            ordered = sorted(street_buckets[street], key=lambda idx: _sort_key(idx, street))
+            if ordered:
+                picked.add(ordered[0])
+
+    middle = [idx for idx in range(1, total - 1) if idx not in picked]
+    ordered_middle = sorted(middle, key=_sort_key)
+    for idx in ordered_middle:
+        if len(picked) >= window_size:
+            break
+        picked.add(idx)
+    return sorted(picked)
+
+
+def _collapse_visible_actions(actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    collapsed: List[Dict[str, Any]] = []
+    previous: Optional[Dict[str, Any]] = None
+    for action in actions:
+        action_type = _sanitize_action_type(action.get("action_type"))
+        zero_money = float(action.get("normalized_amount_bb", 0.0) or 0.0) <= 0.0
+        pot_before = float(action.get("pot_before", 0.0) or 0.0)
+        pot_after = float(action.get("pot_after", 0.0) or 0.0)
+        duplicate_noop = (
+            previous is not None
+            and zero_money
+            and pot_after <= pot_before
+            and action_type in {"check", "fold"}
+            and _sanitize_action_type(previous.get("action_type")) == action_type
+            and int(previous.get("actor_seat", 0) or 0) == int(action.get("actor_seat", 0) or 0)
+            and str(previous.get("street", "")) == str(action.get("street", ""))
+            and float(previous.get("normalized_amount_bb", 0.0) or 0.0) <= 0.0
+            and float(previous.get("pot_after", 0.0) or 0.0)
+            <= float(previous.get("pot_before", 0.0) or 0.0)
+        )
+        if duplicate_noop:
+            continue
+        collapsed.append(action)
+        previous = action
+    return collapsed
 
 
 def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -328,6 +380,7 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     visible_actions: List[Dict[str, Any]] = []
+    raw_actions = _collapse_visible_actions(raw_actions)
     if raw_actions:
         last_idx = len(raw_actions) - 1
         if len(raw_actions) == 1:
@@ -354,6 +407,7 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
                     str(raw_actions[0].get("street", "")),
                     str(len(raw_actions)),
                 ],
+                actions=raw_actions,
             )
         visible_actions = [dict(raw_actions[i]) for i in indices]
 
