@@ -15,7 +15,7 @@ Current production path:
 
 1. live benchmark tables run on Poker44 platform infrastructure;
 2. those hands are persisted in platform SQL;
-3. `poker44-platform-backend` builds labeled evaluation batches from those hands;
+3. `poker44-platform-backend` builds evaluation batches from those hands;
 4. the validator fetches the active batch set through `/internal/eval/current`;
 5. the validator sends those batches to miners through `DetectionSynapse`;
 6. miners return one risk score per received chunk;
@@ -25,8 +25,8 @@ Important: the miner does **not** receive labels.
 
 Released benchmark data is different:
 
-- the public training benchmark exposes miner-visible chunks plus `groundTruth`;
-- the live validator runtime still keeps labels on the validator side only.
+- the public benchmark is for historical replay and miner iteration;
+- live validator runtime keeps labels on the validator side only.
 
 ## Current Miner Contract
 
@@ -63,14 +63,14 @@ together.
 
 But the chunk format delivered to miners is still aligned with the current scoring path:
 
-- the backend builds labeled batches from benchmark-table hands;
+- the backend builds chunk-level evaluation batches from benchmark-table hands;
 - the validator groups those batches into `DetectionSynapse(chunks=...)`;
 - miners return one score per batch/chunk.
 
 So:
 
-- the overall validator request can contain both human-labeled and bot-labeled chunks;
-- each individual chunk is homogeneous, so the hands inside a chunk are all human or all bot;
+- the overall validator request can contain multiple chunk types;
+- each individual chunk remains one scoring unit from the validator’s point of view;
 - miners should not assume a fixed number of hands per chunk.
 
 Do not build your miner assuming this exact granularity will never evolve, but document and
@@ -204,6 +204,7 @@ scoring path.
 
 Recommended fields:
 
+- `schema_version`
 - `open_source`
 - `repo_url`
 - `repo_commit`
@@ -213,12 +214,17 @@ Recommended fields:
 - `license`
 - `training_data_statement`
 - `training_data_sources`
+- `private_data_attestation`
 - `data_attestation`
 - `artifact_url`
 - `artifact_sha256`
+- `model_card_url`
+- `inference_mode`
+- `implementation_files`
 - `implementation_sha256`
+- `notes`
 
-Minimum fields for `transparent` compliance:
+Current production minimum for `transparent` compliance:
 
 - `open_source=true`
 - `repo_url`
@@ -226,7 +232,18 @@ Minimum fields for `transparent` compliance:
 - `model_name`
 - `model_version`
 - `training_data_statement`
-- `data_attestation`
+- `private_data_attestation`
+- `implementation_files`
+- `implementation_sha256`
+
+Current production policy notes:
+
+- `repo_commit` should be a real git commit hash, not a placeholder;
+- `repo_url` should point to the actual public model repo, not a generic reference repo;
+- `implementation_files` should identify the implementation files backing the miner;
+- `implementation_sha256` should match the code actually being served;
+- you should also publish `data_attestation` where applicable, even if a given compliance surface
+  is primarily checking `private_data_attestation`.
 
 The validator still scores your `risk_scores`; the manifest is for transparency and
 runtime tracking.
@@ -235,7 +252,9 @@ Important:
 
 - once a model reaches a sufficiently high score, its published manifest may be reviewed more deeply;
 - the published repository and commit must make the full model flow publicly visible and verifiable;
-- if the published repo/commit does not match the logic behind the observed performance, the model may be disqualified or reduced to a score of `0`.
+- if the published repo/commit does not match the logic behind the observed performance, the model
+  may be penalized, disqualified, or reduced to a score of `0`;
+- incomplete or inconsistent public model identity can trigger stricter review and compliance action.
 
 ## Production Evaluation Boundary
 
@@ -252,14 +271,21 @@ against assumptions about any local reference corpus.
 
 ## Public Training Benchmark
 
-Poker44 also exposes a public training benchmark through the backend API.
+Poker44 also exposes a public benchmark through the backend API.
 
 That benchmark:
 
 - contains previously used evaluation chunks;
-- is released only after those chunks leave the live competitive field;
 - exposes the miner-visible chunk payload;
-- exposes `groundTruth` separately for training.
+- exposes label data separately from the hand payload.
+
+Current production status:
+
+- the benchmark API is live on `https://api.poker44.net/api/v1/benchmark`;
+- release discovery is available through `GET /api/v1/benchmark/releases`;
+- chunk discovery is available through `GET /api/v1/benchmark/chunks?sourceDate=YYYY-MM-DD`;
+- miners should check the benchmark status endpoint instead of assuming a fixed release cadence,
+  because benchmark publication policy may be adjusted operationally.
 
 See:
 
