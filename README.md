@@ -36,22 +36,13 @@ Poker44 is security infrastructure, not a poker room.
 
 The current production direction is:
 
-- live benchmark tables run on Poker44 platform infrastructure;
-- those tables include both human and bot seats;
-- hands are persisted to central platform SQL;
-- `poker44-platform-backend` builds evaluation batches from those benchmark-table hands;
+- evaluation data is produced by Poker44 platform infrastructure;
 - validators do **not** run their own tables;
-- validators fetch the active canonical batch set through the central eval API;
-- validators send those batches to miners, compute rewards, and set weights.
+- validators consume canonical evaluation material from the central eval API;
+- validators query miners, score responses, and set weights on-chain.
 
-On top of that, the current production path also carries the public
-observability layer needed for daily competition:
-
-- signed validator runtime snapshots;
-- signed metagraph-backed network snapshots;
-- public miners/network dashboard surfaces on `poker44-platform-*`;
-- a daily competition view built on the canonical eval feed and the latest
-  signed subnet snapshot.
+The production path also carries the observability layer used by the public
+competition surfaces on `poker44-platform-*`.
 
 The validator production path is now the central `provider_runtime` model.
 
@@ -70,24 +61,18 @@ Current semantics:
 
 This means:
 
-- the overall validator request can contain both human-labeled and bot-labeled chunks;
-- each individual chunk is homogeneous, so the hands inside a chunk are all human or all bot;
 - miners should treat each chunk as one scoring unit, regardless of how many hands it contains.
 
 The competition framing should be understood as:
 
-- daily epoch as the public competition unit;
-- continuous evaluation on canonical live batches during that epoch;
-- public provisional leaderboard derived from the signed subnet snapshot;
-- target settlement model: winner-take-all.
+- time-based competition epochs;
+- continuous evaluation on canonical live batches;
+- public leaderboard surfaces derived from signed runtime state.
 
 In the current runtime, validators read the canonical competition weight
-vector from the backend. Once the backend has settled at least one daily
-winner, that latest settled winner becomes the active on-chain competitive
-allocation for the current period: `97%` is burned to `uid 0`, and the
-remaining `3%` follows the backend-provided winner vector. Before the first
-settlement exists, the backend returns its explicit fallback vector (typically
-`uid 0`, which keeps the burn at `100%`).
+vector from the backend. Competition policy and allocation rules are determined
+by the platform runtime and may evolve independently of the reference code in
+this repo.
 
 See:
 
@@ -101,9 +86,7 @@ See:
 
 Production validators now target:
 
-- live hands from Poker44 benchmark tables;
-- SQL-persisted events and hand results;
-- centralized batch generation through `/internal/eval/*`.
+- centralized evaluation data supplied by Poker44 platform infrastructure.
 
 The repo may still include reference tooling for miner development, but production evaluation is
 driven by the central platform runtime and should not be inferred from local helper artifacts.
@@ -148,14 +131,6 @@ Then follow:
 - [Validator setup](docs/validator.md)
 - [Miner setup](docs/miner.md)
 - [Training benchmark](docs/training-benchmark.md)
-
-Validated current production-like validator profile:
-
-- `POKER44_RUNTIME_MODE=provider_runtime`
-- `POKER44_CHUNK_COUNT=80`
-- `POKER44_REWARD_WINDOW=40`
-- `POKER44_POLL_INTERVAL_SECONDS=300`
-- `--neuron.timeout 60`
 
 ---
 
