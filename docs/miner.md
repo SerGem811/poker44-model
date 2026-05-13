@@ -23,6 +23,12 @@ Current production path:
 
 Important: the miner does **not** receive labels.
 
+Current competition framing:
+
+- competition epochs run for `72h`;
+- active canonical evaluation windows run in `6h` blocks inside that epoch;
+- miners are still evaluated continuously through the same chunk-level contract.
+
 Released benchmark data is different:
 
 - the public benchmark is for historical replay and miner iteration;

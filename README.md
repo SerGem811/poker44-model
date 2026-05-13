@@ -69,6 +69,12 @@ The competition framing should be understood as:
 - continuous evaluation on canonical live batches;
 - public leaderboard surfaces derived from signed runtime state.
 
+At the current production cadence:
+
+- competitions run in rolling `72h` epochs anchored at `20:00 UTC`;
+- canonical evaluation material is published and refreshed in `6h` windows;
+- the latest fully settled competition winner remains the canonical reference slot until the next settlement closes.
+
 In the current runtime, validators read the canonical competition weight
 vector from the backend. Competition policy and allocation rules are determined
 by the platform runtime and may evolve independently of the reference code in
