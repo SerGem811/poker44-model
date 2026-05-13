@@ -53,7 +53,14 @@ def _current_competition_epoch(now: Optional[datetime] = None) -> Dict[str, Any]
     )
     if current < start:
         start -= timedelta(days=1)
-    end = start + timedelta(days=1)
+
+    anchor_start = datetime(2026, 5, 12, 20, 0, 0, tzinfo=timezone.utc)
+    if start >= anchor_start:
+        elapsed_days = (start - anchor_start).days
+        aligned_days = elapsed_days - (elapsed_days % 3)
+        start = anchor_start + timedelta(days=aligned_days)
+
+    end = start + timedelta(hours=72)
     return {
         "competition_epoch_id": f"day_{start.date().isoformat()}_2000utc",
         "competition_epoch_start": start.isoformat(),
