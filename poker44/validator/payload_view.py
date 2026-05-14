@@ -49,7 +49,6 @@ _ALLOWED_ACTION_TYPES = {
     "bet",
     "raise",
     "fold",
-    "all_in",
 }
 
 
@@ -351,6 +350,8 @@ def build_miner_payload_hand(hand_payload: Dict[str, Any]) -> Dict[str, Any]:
             pot_before_bb=pot_before_bb,
             pot_after_bb=pot_after_bb,
         )
+        if action_type in {"small_blind", "big_blind", "ante"}:
+            continue
         if direct_action_type == "" and (
             not action_type
             or (
