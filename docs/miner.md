@@ -281,9 +281,10 @@ Poker44 also exposes a public benchmark through the backend API.
 
 That benchmark:
 
-- contains previously used evaluation chunks;
+- is intended as a public training surface for miner iteration;
 - exposes the miner-visible chunk payload;
-- exposes label data separately from the hand payload.
+- exposes label data separately from the hand payload;
+- is deliberately separated from the live competition surface.
 
 Current production status:
 
