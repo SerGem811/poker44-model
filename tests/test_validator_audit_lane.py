@@ -15,7 +15,7 @@ from poker44.validator.audit import (
 class ValidatorAuditLaneTests(unittest.TestCase):
     def test_local_audit_lane_persists_useful_record_without_provider(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            target = Path(tmpdir) / "audit_reports.json"
+            target = Path(tmpdir) / "audit_reports.json.enc"
             lane = ValidatorAuditLane.from_env(path=target)
 
             evidence = build_validator_audit_evidence(
@@ -62,6 +62,12 @@ class ValidatorAuditLaneTests(unittest.TestCase):
             self.assertEqual(record["competition_epoch_id"], "epoch-1")
             self.assertEqual(record["top_uid"], 211)
             self.assertTrue(target.exists())
+            encrypted_payload = target.read_text(encoding="utf-8")
+            self.assertIn('"ciphertext_b64"', encrypted_payload)
+            self.assertNotIn("dataset-123", encrypted_payload)
+            self.assertNotIn("poker44-benchmark-supervised", encrypted_payload)
+            summary_path = Path(tmpdir) / "audit_reports.summary.json"
+            self.assertTrue(summary_path.exists())
             summary = lane.public_summary()
             self.assertEqual(summary["provider"], "none")
             self.assertEqual(summary["last_status"], "local_only")
@@ -116,7 +122,7 @@ class ValidatorAuditLaneTests(unittest.TestCase):
             },
             clear=False,
         ):
-            target = Path(tmpdir) / "audit_reports.json"
+            target = Path(tmpdir) / "audit_reports.json.enc"
             lane = ValidatorAuditLane.from_env(path=target)
 
         self.assertEqual(lane.provider, "verathos")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -12,12 +13,29 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, MutableMapping, Optional
 
 import requests
+from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.PublicKey import RSA
+from Crypto.Random import get_random_bytes
 
 from poker44.validator.integrity import load_json_registry, persist_json_registry
 
 UTC = timezone.utc
 DEFAULT_VERATHOS_BASE_URL = "https://api.verathos.ai/v1"
 DEFAULT_RECENT_REPORTS = 32
+DEFAULT_POKER44_AUDIT_PUBLIC_KEY_PEM = """-----BEGIN PUBLIC KEY-----
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA+QF4Cr+x6GnUW+fJGvzp
+L7LFpFGpWzqaQNLrjp1khPSIMJETSovGD/hHI2RZFv49+DKP5pzT+oN4k8aVbq9H
+oWxH6jdAe+1Eh1Cup5q6x/YQjo6qy1qfV+fR0Mv4RR7mV1+kYj7n5VsCZ09gx1BS
+Puy+yookhH2LBi5Om/x3+Uw0rS1rB1lBAGD0OezWoM1DCc9HvWN3w1QN/D8ulDUa
+euflk6MTBIq0Tj4SqVTxBL79FtYcMTdnQ3cxkIZkCVl00pFmk3LmlkwIeeeYbf/g
+TzD4Usr0FbisvYEzt98TgFVTkoD5rlrAWduMYm02bBiNdcXyoJ1/TFXiT/sU2CIT
+w0bQp9EAhPGSgHkUrIziZURThuz2VRCYtWbq+9UGS+4ApvAAwQoWqHgeXKzxt1ct
+igDyefBwQ+cClPVJ5zoOKCdn5ms8KBbwk0PFWPDYcagpRprwz7Banckm1/0CkZ19
+3Gy/qkCZB8ilwueKS72Nt1X1gWWWhY9MNXB15748FXQNRkbChTi27cKYOvBeKlPs
+QXgtks41m0Wpciy8M04e3KCoNi/PYy152OrOL5Yb+IULea4H/zbC67L3T1bOkP7c
+asumtu5xcdvJw9o5grZp2SjrLn9NKXpivoMWc9KUOoxSaam3cHu9QPzo1rwBtxfj
+gxDz6y08h3vD4eqZC7+Glw8CAwEAAQ==
+-----END PUBLIC KEY-----"""
 
 
 def _now_iso() -> str:
@@ -61,6 +79,37 @@ def _normalize_json_content(raw: str) -> Dict[str, Any]:
         "summary": text,
         "findings": [],
         "next_steps": [],
+    }
+
+
+def _public_key_pem_from_env_or_default() -> str:
+    pem = str(os.getenv("POKER44_AUDIT_PUBLIC_KEY_PEM", "")).strip()
+    return pem or DEFAULT_POKER44_AUDIT_PUBLIC_KEY_PEM
+
+
+def _encrypt_audit_payload(payload: Mapping[str, Any], *, public_key_pem: str) -> Dict[str, Any]:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    session_key = get_random_bytes(32)
+    cipher_rsa = PKCS1_OAEP.new(RSA.import_key(public_key_pem))
+    encrypted_session_key = cipher_rsa.encrypt(session_key)
+    cipher_aes = AES.new(session_key, AES.MODE_GCM)
+    ciphertext, tag = cipher_aes.encrypt_and_digest(encoded)
+    return {
+        "schema": "poker44.audit.encrypted.v1",
+        "cipher": "AES-256-GCM",
+        "key_wrap": "RSA-OAEP",
+        "public_key_fingerprint": hashlib.sha256(public_key_pem.encode("utf-8")).hexdigest(),
+        "created_at": _now_iso(),
+        "payload_sha256": hashlib.sha256(encoded).hexdigest(),
+        "encrypted_session_key_b64": base64.b64encode(encrypted_session_key).decode("ascii"),
+        "nonce_b64": base64.b64encode(cipher_aes.nonce).decode("ascii"),
+        "tag_b64": base64.b64encode(tag).decode("ascii"),
+        "ciphertext_b64": base64.b64encode(ciphertext).decode("ascii"),
     }
 
 
@@ -185,20 +234,23 @@ class ValidatorAuditLane:
         self,
         *,
         path: str | Path | None,
+        summary_path: str | Path | None,
         provider: str,
         mode: str,
         recent_limit: int = DEFAULT_RECENT_REPORTS,
         verathos_client: Optional[VerathosAuditClient] = None,
     ) -> None:
         self.path = Path(path) if path is not None else None
+        self.summary_path = Path(summary_path) if summary_path is not None else None
         self.provider = provider
         self.mode = mode
         self.recent_limit = max(1, int(recent_limit))
         self.verathos_client = verathos_client
         self.registry = load_json_registry(
-            self.path,
+            self.summary_path,
             default={"latest": {}, "recent_reports": [], "summary": {}},
         )
+        self._migrate_legacy_plaintext_if_present()
         self._recompute_summary()
 
     @classmethod
@@ -215,8 +267,18 @@ class ValidatorAuditLane:
             if client_cfg is not None:
                 verathos_client = VerathosAuditClient(client_cfg)
 
+        encrypted_path = Path(path) if path is not None else None
+        summary_path = None
+        if encrypted_path is not None:
+            if encrypted_path.name.endswith(".json.enc"):
+                summary_name = encrypted_path.name.replace(".json.enc", ".summary.json")
+            else:
+                summary_name = f"{encrypted_path.name}.summary.json"
+            summary_path = encrypted_path.with_name(summary_name)
+
         return cls(
-            path=path,
+            path=encrypted_path,
+            summary_path=summary_path,
             provider=provider,
             mode=mode,
             recent_limit=recent_limit,
@@ -259,6 +321,7 @@ class ValidatorAuditLane:
                 record["status"] = "provider_failed"
                 record["status_reason"] = _truncate_text(exc, limit=300)
 
+        self._persist_encrypted(record)
         self._append_record(record)
         self._persist()
         return dict(record)
@@ -309,7 +372,7 @@ class ValidatorAuditLane:
             "input_hash": record.get("input_hash"),
         }
         self.registry["latest"] = latest_payload
-        recent_reports.append(dict(record))
+        recent_reports.append(dict(latest_payload))
         if len(recent_reports) > self.recent_limit:
             del recent_reports[:-self.recent_limit]
         self._recompute_summary()
@@ -338,7 +401,45 @@ class ValidatorAuditLane:
         }
 
     def _persist(self) -> None:
-        persist_json_registry(self.path, self.registry)
+        persist_json_registry(self.summary_path, self.registry)
+
+    def _persist_encrypted(self, record: Mapping[str, Any]) -> None:
+        if self.path is None:
+            return
+        envelope = _encrypt_audit_payload(
+            record,
+            public_key_pem=_public_key_pem_from_env_or_default(),
+        )
+        persist_json_registry(self.path, envelope)
+
+    def _migrate_legacy_plaintext_if_present(self) -> None:
+        if self.path is None:
+            return
+        if self.path.name.endswith(".json.enc"):
+            legacy_path = self.path.with_suffix("")
+        else:
+            legacy_path = None
+
+        if legacy_path is None or not legacy_path.exists():
+            return
+
+        legacy_payload = load_json_registry(legacy_path, default={})
+        if legacy_payload and not self.registry.get("latest"):
+            latest = legacy_payload.get("latest", {})
+            recent_reports = legacy_payload.get("recent_reports", [])
+            summary = legacy_payload.get("summary", {})
+            if isinstance(latest, dict):
+                self.registry["latest"] = latest
+            if isinstance(recent_reports, list):
+                self.registry["recent_reports"] = recent_reports[-self.recent_limit :]
+            if isinstance(summary, dict):
+                self.registry["summary"] = summary
+            persist_json_registry(self.summary_path, self.registry)
+
+        try:
+            legacy_path.unlink()
+        except Exception:
+            pass
 
 
 def build_validator_audit_evidence(

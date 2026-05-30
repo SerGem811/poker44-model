@@ -116,7 +116,7 @@ class Validator(BaseValidatorNeuron):
         self.compliance_registry_path = state_dir / "compliance_registry.json"
         self.suspicion_registry_path = state_dir / "suspicion_registry.json"
         self.served_chunk_registry_path = state_dir / "served_chunk_registry.json"
-        self.audit_registry_path = state_dir / "audit_reports.json"
+        self.audit_registry_path = state_dir / "audit_reports.json.enc"
         self.model_manifest_registry = load_json_registry(self.model_manifest_path)
         self.compliance_registry = load_json_registry(
             self.compliance_registry_path,

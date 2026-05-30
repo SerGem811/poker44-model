@@ -211,6 +211,7 @@ Optional audit lane:
 - `POKER44_VERATHOS_MODEL`
 - `POKER44_VERATHOS_BASE_URL=https://api.verathos.ai/v1`
 - `POKER44_VERATHOS_TIMEOUT_SECONDS=20`
+- `POKER44_AUDIT_PUBLIC_KEY_PEM` (optional override; defaults to the embedded Poker44 public key)
 
 Notes:
 
@@ -228,8 +229,10 @@ Validators now support a best-effort audit lane alongside the main scoring path.
 Current behavior:
 
 - the main miner-scoring flow remains unchanged;
-- each completed evaluation cycle can produce an `audit_reports.json` registry in the validator state dir;
-- when `POKER44_AUDIT_PROVIDER=none`, the validator still records a local audit trail with:
+- each completed evaluation cycle can produce:
+  - `audit_reports.json.enc` with the full audit record encrypted for Poker44;
+  - `audit_reports.summary.json` with only non-sensitive local summary fields;
+- when `POKER44_AUDIT_PROVIDER=none`, the validator still records an encrypted local audit trail with:
   - epoch/chunk identifiers,
   - dataset hash,
   - top competition rows,
@@ -245,6 +248,10 @@ This audit lane is intentionally best-effort:
 - provider failures are recorded but do not interrupt the validator cycle;
 - runtime snapshots now include the latest audit summary so the platform can expose
   audit status separately from reward computation.
+
+The encrypted artifact is written with Poker44's audit public key by default, so a
+validator operator can store it locally but cannot decrypt the full report from the
+node without the corresponding private key held by Poker44.
 
 ## Run Validator
 
