@@ -68,6 +68,9 @@ class ValidatorAuditLaneTests(unittest.TestCase):
             self.assertNotIn("poker44-benchmark-supervised", encrypted_payload)
             summary_path = Path(tmpdir) / "audit_reports.summary.json"
             self.assertTrue(summary_path.exists())
+            summary_payload = summary_path.read_text(encoding="utf-8")
+            self.assertNotIn('"evidence"', summary_payload)
+            self.assertNotIn("poker44-benchmark-supervised", summary_payload)
             summary = lane.public_summary()
             self.assertEqual(summary["provider"], "none")
             self.assertEqual(summary["last_status"], "local_only")

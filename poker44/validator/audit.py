@@ -250,6 +250,7 @@ class ValidatorAuditLane:
             self.summary_path,
             default={"latest": {}, "recent_reports": [], "summary": {}},
         )
+        self._sanitize_summary_registry()
         self._migrate_legacy_plaintext_if_present()
         self._recompute_summary()
 
@@ -352,25 +353,7 @@ class ValidatorAuditLane:
 
     def _append_record(self, record: MutableMapping[str, Any]) -> None:
         recent_reports = self.registry.setdefault("recent_reports", [])
-        latest_payload = {
-            "created_at": record.get("created_at"),
-            "provider": record.get("provider"),
-            "mode": record.get("mode"),
-            "status": record.get("status"),
-            "status_reason": record.get("status_reason"),
-            "competition_epoch_id": record.get("competition_epoch_id"),
-            "active_chunk_id": record.get("active_chunk_id"),
-            "active_chunk_hash": record.get("active_chunk_hash"),
-            "dataset_hash": record.get("dataset_hash"),
-            "top_uid": record.get("top_uid"),
-            "top_reward": record.get("top_reward"),
-            "proof_verified": bool(record.get("proof_verified")),
-            "provider_model": record.get("provider_model"),
-            "provider_request_id": record.get("provider_request_id"),
-            "latency_seconds": record.get("latency_seconds"),
-            "audit_output": record.get("audit_output"),
-            "input_hash": record.get("input_hash"),
-        }
+        latest_payload = self._build_public_report_summary(record)
         self.registry["latest"] = latest_payload
         recent_reports.append(dict(latest_payload))
         if len(recent_reports) > self.recent_limit:
@@ -429,9 +412,13 @@ class ValidatorAuditLane:
             recent_reports = legacy_payload.get("recent_reports", [])
             summary = legacy_payload.get("summary", {})
             if isinstance(latest, dict):
-                self.registry["latest"] = latest
+                self.registry["latest"] = self._build_public_report_summary(latest)
             if isinstance(recent_reports, list):
-                self.registry["recent_reports"] = recent_reports[-self.recent_limit :]
+                self.registry["recent_reports"] = [
+                    self._build_public_report_summary(item)
+                    for item in recent_reports[-self.recent_limit :]
+                    if isinstance(item, dict)
+                ]
             if isinstance(summary, dict):
                 self.registry["summary"] = summary
             persist_json_registry(self.summary_path, self.registry)
@@ -440,6 +427,43 @@ class ValidatorAuditLane:
             legacy_path.unlink()
         except Exception:
             pass
+
+    def _sanitize_summary_registry(self) -> None:
+        latest = self.registry.get("latest", {})
+        if isinstance(latest, dict):
+            self.registry["latest"] = self._build_public_report_summary(latest)
+
+        recent_reports = self.registry.get("recent_reports", [])
+        if isinstance(recent_reports, list):
+            self.registry["recent_reports"] = [
+                self._build_public_report_summary(item)
+                for item in recent_reports
+                if isinstance(item, dict)
+            ][-self.recent_limit :]
+
+        persist_json_registry(self.summary_path, self.registry)
+
+    @staticmethod
+    def _build_public_report_summary(record: Mapping[str, Any]) -> Dict[str, Any]:
+        return {
+            "created_at": record.get("created_at"),
+            "provider": record.get("provider"),
+            "mode": record.get("mode"),
+            "status": record.get("status"),
+            "status_reason": record.get("status_reason"),
+            "competition_epoch_id": record.get("competition_epoch_id"),
+            "active_chunk_id": record.get("active_chunk_id"),
+            "active_chunk_hash": record.get("active_chunk_hash"),
+            "dataset_hash": record.get("dataset_hash"),
+            "top_uid": record.get("top_uid"),
+            "top_reward": record.get("top_reward"),
+            "proof_verified": bool(record.get("proof_verified")),
+            "provider_model": record.get("provider_model"),
+            "provider_request_id": record.get("provider_request_id"),
+            "latency_seconds": record.get("latency_seconds"),
+            "audit_output": record.get("audit_output"),
+            "input_hash": record.get("input_hash"),
+        }
 
 
 def build_validator_audit_evidence(
