@@ -285,6 +285,17 @@ async def _run_forward_cycle(validator) -> None:
         metrics_map=metrics_map,
         response_metadata=response_metadata,
     )
+    record_audit_report = getattr(validator, "_record_audit_report", None)
+    if callable(record_audit_report):
+        try:
+            record_audit_report(
+                total_hands=total_hands,
+                chunk_count=len(chunks),
+                human_chunk_count=sum(1 for label in batch_labels if label == 0),
+                bot_chunk_count=sum(1 for label in batch_labels if label == 1),
+            )
+        except Exception as exc:
+            bt.logging.warning(f"Audit report recording failed: {exc}")
     report_competition_scores = getattr(validator, "_report_competition_scores", None)
     if callable(report_competition_scores):
         try:

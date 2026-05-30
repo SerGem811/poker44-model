@@ -37,6 +37,7 @@ class ValidatorRuntimeSmokeGuardTests(unittest.TestCase):
             )
             dummy.runtime_info = {"python_version": "test"}
             dummy.competition_scores_payload = []
+            dummy.audit_summary = {"provider": "none", "last_status": "local_only"}
             dummy.resolve_uid = lambda _hotkey: 74
             dummy.runtime_snapshot_path = Path(tmpdir) / "validator_runtime.json"
             dummy.network_snapshot_path = Path(tmpdir) / "network_snapshot.json"
@@ -53,6 +54,7 @@ class ValidatorRuntimeSmokeGuardTests(unittest.TestCase):
             payload = write_snapshot.call_args_list[0].args[1]
             self.assertEqual(payload["runtime_mode"], "initializing")
             self.assertEqual(payload["validator_uid"], 74)
+            self.assertEqual(payload["audit"]["provider"], "none")
 
 
 if __name__ == "__main__":

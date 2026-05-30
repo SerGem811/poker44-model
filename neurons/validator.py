@@ -40,6 +40,7 @@ from poker44.utils.runtime_info import (
 from poker44.utils.wandb_helper import ValidatorWandbHelper
 from poker44.validator.forward import forward as forward_cycle
 from poker44.validator.integrity import load_json_registry
+from poker44.validator.audit import ValidatorAuditLane, build_validator_audit_evidence
 from poker44.validator.runtime_provider import (
     ProviderRuntimeConfig,
     ProviderRuntimeDatasetProvider,
@@ -115,6 +116,7 @@ class Validator(BaseValidatorNeuron):
         self.compliance_registry_path = state_dir / "compliance_registry.json"
         self.suspicion_registry_path = state_dir / "suspicion_registry.json"
         self.served_chunk_registry_path = state_dir / "served_chunk_registry.json"
+        self.audit_registry_path = state_dir / "audit_reports.json"
         self.model_manifest_registry = load_json_registry(self.model_manifest_path)
         self.compliance_registry = load_json_registry(
             self.compliance_registry_path,
@@ -128,6 +130,8 @@ class Validator(BaseValidatorNeuron):
             self.served_chunk_registry_path,
             default={"chunk_index": {}, "recent_cycles": [], "summary": {}},
         )
+        self.audit_lane = ValidatorAuditLane.from_env(path=self.audit_registry_path)
+        self.audit_summary = self.audit_lane.public_summary()
         self.wandb_helper = ValidatorWandbHelper(
             config=cfg,
             validator_uid=self.resolve_uid(self.wallet.hotkey.ss58_address),
@@ -198,6 +202,7 @@ class Validator(BaseValidatorNeuron):
             "active_chunk_id": provider_stats.get("active_chunk_id"),
             "active_chunk_hash": provider_stats.get("active_chunk_hash"),
             "competition_scores": list(getattr(self, "competition_scores_payload", []) or []),
+            "audit": dict(getattr(self, "audit_summary", {}) or {}),
             "runtime": self.runtime_info,
         }
         if extra:
@@ -335,6 +340,48 @@ class Validator(BaseValidatorNeuron):
                 "Competition score report failed | "
                 f"url={report_url} message={message}"
             )
+
+    def _record_audit_report(
+        self,
+        *,
+        total_hands: int,
+        chunk_count: int,
+        human_chunk_count: int,
+        bot_chunk_count: int,
+    ) -> None:
+        audit_lane = getattr(self, "audit_lane", None)
+        if audit_lane is None:
+            return
+
+        provider_stats = (
+            getattr(self.provider, "stats", {})
+            if hasattr(self, "provider") and hasattr(self.provider, "stats")
+            else {}
+        )
+        evidence = build_validator_audit_evidence(
+            validator_uid=self.resolve_uid(self.wallet.hotkey.ss58_address),
+            validator_hotkey=self.wallet.hotkey.ss58_address,
+            forward_count=int(getattr(self, "forward_count", 0)),
+            dataset_hash=str(getattr(self.provider, "dataset_hash", "") or ""),
+            provider_stats=provider_stats,
+            competition_rows=list(getattr(self, "competition_scores_payload", []) or []),
+            chunk_count=int(chunk_count),
+            total_hands=int(total_hands),
+            human_chunk_count=int(human_chunk_count),
+            bot_chunk_count=int(bot_chunk_count),
+            suspicion_summary=(getattr(self, "suspicion_registry", {}) or {}).get("summary", {}),
+            compliance_summary=(getattr(self, "compliance_registry", {}) or {}).get("summary", {}),
+            served_chunk_summary=(getattr(self, "served_chunk_registry", {}) or {}).get("summary", {}),
+            max_rows=int(os.getenv("POKER44_AUDIT_TOP_ROWS", "8")),
+        )
+        record = audit_lane.record_cycle(evidence=evidence)
+        self.audit_summary = audit_lane.public_summary()
+        bt.logging.info(
+            "Audit lane updated | "
+            f"provider={record.get('provider')} status={record.get('status')} "
+            f"epoch={record.get('competition_epoch_id')} top_uid={record.get('top_uid')} "
+            f"proof_verified={record.get('proof_verified')}"
+        )
 
     async def forward(self, synapse=None):  # type: ignore[override]
         return await forward_cycle(self)

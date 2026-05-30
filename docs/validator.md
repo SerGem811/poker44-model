@@ -201,6 +201,17 @@ Optional observability/reporting:
 - `POKER44_VALIDATOR_RUNTIME_REPORT_URL`
 - `POKER44_VALIDATOR_NETWORK_SNAPSHOT_REPORT_URL`
 
+Optional audit lane:
+
+- `POKER44_AUDIT_PROVIDER=none|verathos`
+- `POKER44_AUDIT_MODE=shadow|disabled`
+- `POKER44_AUDIT_TOP_ROWS=8`
+- `POKER44_AUDIT_RECENT_REPORT_LIMIT=32`
+- `POKER44_VERATHOS_API_KEY`
+- `POKER44_VERATHOS_MODEL`
+- `POKER44_VERATHOS_BASE_URL=https://api.verathos.ai/v1`
+- `POKER44_VERATHOS_TIMEOUT_SECONDS=20`
+
 Notes:
 
 - `POKER44_EVAL_API_BASE_URL` points at the central `poker44-platform-backend`;
@@ -209,6 +220,31 @@ Notes:
 - validator-facing eval reads and score reporting can run with signed hotkey auth
   when the backend is configured for validator access;
 - each batch/chunk may contain one or many hands.
+
+## Audit Lane
+
+Validators now support a best-effort audit lane alongside the main scoring path.
+
+Current behavior:
+
+- the main miner-scoring flow remains unchanged;
+- each completed evaluation cycle can produce an `audit_reports.json` registry in the validator state dir;
+- when `POKER44_AUDIT_PROVIDER=none`, the validator still records a local audit trail with:
+  - epoch/chunk identifiers,
+  - dataset hash,
+  - top competition rows,
+  - validator/runtime context,
+  - integrity/compliance summaries;
+- when `POKER44_AUDIT_PROVIDER=verathos` and Verathos credentials are configured,
+  the validator also performs a shadow external audit call and stores the returned
+  verification metadata and structured summary.
+
+This audit lane is intentionally best-effort:
+
+- audit failures do not block miner scoring;
+- provider failures are recorded but do not interrupt the validator cycle;
+- runtime snapshots now include the latest audit summary so the platform can expose
+  audit status separately from reward computation.
 
 ## Run Validator
 
