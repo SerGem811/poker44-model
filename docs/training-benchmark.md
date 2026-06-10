@@ -12,8 +12,8 @@ Poker44 provides a public training benchmark for miner development. Use it to:
 - run regression tests across model versions;
 - calibrate model outputs against labeled chunk data.
 
-The benchmark is a development dataset. Treat live evaluation as a separate
-competition surface.
+The benchmark is a development dataset for model training, validation, parser
+testing, and regression testing.
 
 ## API Base
 
@@ -125,6 +125,30 @@ The labels are returned separately:
 
 Do not read labels from individual hand objects.
 
+Minimal validation example:
+
+```python
+import requests
+
+base_url = "https://api.poker44.net/api/v1/benchmark"
+source_date = "2026-06-10"
+
+payload = requests.get(
+    f"{base_url}/chunks",
+    params={"sourceDate": source_date, "limit": 100},
+    timeout=30,
+).json()["data"]
+
+for chunk in payload["chunks"]:
+    model_inputs = chunk["chunks"]
+    labels = chunk["groundTruth"]
+
+    predictions = model.predict_proba(model_inputs)
+
+    assert len(predictions) == len(labels)
+    assert all(0.0 <= score <= 1.0 for score in predictions)
+```
+
 ## Hand Fields
 
 Hands may include:
@@ -151,15 +175,50 @@ Action records may include:
 
 Code should tolerate missing optional fields and empty arrays.
 
+## Training Guidance
+
+Use each chunk group as one training example. The target is the matching entry
+in `groundTruth`, in the same array position.
+
+Recommended practices:
+
+- keep release dates separate when creating train, validation, and local test
+  sets;
+- use the returned `split` field when it is present;
+- train across multiple release dates instead of fitting one date tightly;
+- save `sourceDate`, `releaseVersion`, `schemaVersion`, `chunkId`, and
+  `chunkHash` with every local experiment;
+- cache downloaded JSON by `chunkHash` so experiments are reproducible;
+- ignore unknown response fields so clients keep working as the schema expands;
+- avoid using identifiers such as `hand_id` or `chunkId` as model features.
+
+Useful metrics:
+
+- ROC AUC for ranking quality;
+- average precision for bot-class retrieval;
+- log loss or Brier score for probability calibration;
+- per-release metrics to catch overfitting to one benchmark date.
+
 ## Recommended Workflow
 
 1. Fetch release dates from `/releases`.
 2. Download chunks by `sourceDate`.
-3. Split by the returned `split` field when present.
-4. Train on `train` chunks.
-5. Tune and compare on `validation` chunks.
-6. Keep a held-out local set for model regression tests.
-7. Track performance by release date and model version.
+3. Cache raw responses and record `chunkHash`.
+4. Split by release date and by the returned `split` field when present.
+5. Build features only from miner-visible hand and action data.
+6. Train on `train` chunks.
+7. Tune and compare on `validation` chunks.
+8. Keep a held-out local set for model regression tests.
+9. Track performance by release date and model version.
+
+## Common Mistakes
+
+- Producing one prediction per hand instead of one prediction per chunk group.
+- Reordering `chunks` before pairing predictions with `groundTruth`.
+- Training and validating on the same release date only.
+- Treating optional fields as always present.
+- Using IDs, dates, hashes, or pagination order as predictive features.
+- Assuming every chunk has the same number of hands or actions.
 
 ## Notes
 
@@ -167,4 +226,6 @@ Code should tolerate missing optional fields and empty arrays.
 - Response fields may expand, so clients should ignore unknown fields.
 - The chunk order and label order are significant.
 - Avoid tuning a model against a single release only.
-- Prefer evaluation across multiple release dates.
+- Prefer testing across multiple release dates.
+- Use the benchmark for model development, parser testing, feature validation,
+  and regression testing.
