@@ -118,6 +118,8 @@ groups. Each group contains one or more poker hands.
 Miners should produce one prediction per chunk group, matching the order of
 `chunks`.
 
+Current releases use at least 30 hands per chunk group.
+
 The labels are returned separately:
 
 - `groundTruth`: numeric labels, where `1` means bot and `0` means human.
@@ -218,7 +220,7 @@ Useful metrics:
 - Training and validating on the same release date only.
 - Treating optional fields as always present.
 - Using IDs, dates, hashes, or pagination order as predictive features.
-- Assuming every chunk has the same number of hands or actions.
+- Assuming every chunk group has the same number of hands or actions.
 
 ## Notes
 
