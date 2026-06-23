@@ -5,6 +5,10 @@ from poker44.validator.forward import _select_weight_targets
 
 
 class BurnWeightTests(unittest.TestCase):
+    def test_burn_configuration_targets_seventy_percent(self):
+        self.assertAlmostEqual(BURN_FRACTION, 0.70, places=6)
+        self.assertAlmostEqual(KEEP_FRACTION, 0.30, places=6)
+
     def test_podium_burn_assigns_uid_zero_and_top_three(self):
         reward_map = {
             1: 0.25,
