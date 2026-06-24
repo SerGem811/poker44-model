@@ -507,7 +507,9 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
     axons: List = []
     target_uids_env = os.getenv("POKER44_TARGET_MINER_UIDS", "").strip()
     miners_per_cycle_env = os.getenv("POKER44_MINERS_PER_CYCLE", "16").strip()
+    min_validator_stake_env = os.getenv("POKER44_MIN_VALIDATOR_STAKE", "17000").strip()
     miners_per_cycle = 16
+    min_validator_stake = 17000.0
     target_uids = None
     if target_uids_env:
         try:
@@ -529,13 +531,25 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
             f"Invalid POKER44_MINERS_PER_CYCLE={miners_per_cycle_env!r}; defaulting to 16."
         )
         miners_per_cycle = 16
+    try:
+        min_validator_stake = float(min_validator_stake_env)
+    except ValueError:
+        bt.logging.warning(
+            f"Invalid POKER44_MIN_VALIDATOR_STAKE={min_validator_stake_env!r}; defaulting to 17000."
+        )
+        min_validator_stake = 17000.0
 
     for uid, axon in enumerate(validator.metagraph.axons):
         if uid == UID_ZERO:
             continue
         if target_uids is not None and uid not in target_uids:
             continue
-        if bool(validator.metagraph.validator_permit[uid]):
+        stake = 0.0
+        try:
+            stake = float(validator.metagraph.S[uid])
+        except Exception:
+            stake = 0.0
+        if bool(validator.metagraph.validator_permit[uid]) and stake >= min_validator_stake:
             continue
         ip = str(getattr(axon, "ip", "") or "")
         port = int(getattr(axon, "port", 0) or 0)
