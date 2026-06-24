@@ -34,7 +34,7 @@ from poker44.utils.config import add_validator_args
 
 
 UID_ZERO = 0
-BACKEND_BURN_FRACTION = 0.70
+BACKEND_BURN_FRACTION = 0.00
 BACKEND_KEEP_FRACTION = 1.0 - BACKEND_BURN_FRACTION
 
 

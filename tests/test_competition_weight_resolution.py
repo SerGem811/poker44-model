@@ -35,7 +35,7 @@ class CompetitionWeightResolutionTests(unittest.TestCase):
         self.assertIsInstance(raw_weights, np.ndarray)
         self.assertEqual(metadata["weights_source"], "competition_settlement")
         self.assertEqual(metadata["settlement_winner_uid"], 42)
-        self.assertEqual(int(np.count_nonzero(raw_weights)), 2)
+        self.assertEqual(int(np.count_nonzero(raw_weights)), 1)
         self.assertAlmostEqual(float(raw_weights[0]), BACKEND_BURN_FRACTION, places=6)
         self.assertAlmostEqual(float(raw_weights[42]), BACKEND_KEEP_FRACTION, places=6)
         self.assertAlmostEqual(float(raw_weights.sum()), 1.0, places=6)
