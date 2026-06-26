@@ -116,10 +116,10 @@ class ProviderRuntimeConfig:
     internal_secret: str
     validator_id: str
     chunk_count: int = 120
-    min_hands_per_chunk: int = 72
-    max_hands_per_chunk: int = 160
+    min_hands_per_chunk: int = 100
+    max_hands_per_chunk: int = 100
     min_eval_hands: int = 120
-    max_eval_hands: int = 160
+    max_eval_hands: int = 100
     require_mixed: bool = True
     attempt_publish_current: bool = True
     mark_evaluated: bool = True
@@ -149,10 +149,10 @@ class ProviderRuntimeConfig:
             internal_secret=internal_secret,
             validator_id=validator_id,
             chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "120"))),
-            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "72"))),
-            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "160"))),
+            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "100"))),
+            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "100"))),
             min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "120"))),
-            max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "160"))),
+            max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "100"))),
             require_mixed=_env_bool("POKER44_PROVIDER_REQUIRE_MIXED", True),
             attempt_publish_current=_env_bool("POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT", True),
             mark_evaluated=_env_bool("POKER44_PROVIDER_MARK_EVALUATED", True),
