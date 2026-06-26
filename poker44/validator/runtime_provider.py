@@ -54,13 +54,23 @@ def _current_competition_epoch(now: Optional[datetime] = None) -> Dict[str, Any]
     if current < start:
         start -= timedelta(days=1)
 
-    anchor_start = datetime(2026, 5, 12, 20, 0, 0, tzinfo=timezone.utc)
-    if start >= anchor_start:
-        elapsed_days = (start - anchor_start).days
-        aligned_days = elapsed_days - (elapsed_days % 3)
-        start = anchor_start + timedelta(days=aligned_days)
+    epoch_hours = 24
 
-    end = start + timedelta(hours=72)
+    current_anchor_start = datetime(2026, 6, 17, 20, 0, 0, tzinfo=timezone.utc)
+    if start >= current_anchor_start:
+        elapsed_days = (start - current_anchor_start).days
+        aligned_days = elapsed_days - (elapsed_days % 5)
+        start = current_anchor_start + timedelta(days=aligned_days)
+        epoch_hours = 120
+    else:
+        legacy_anchor_start = datetime(2026, 5, 12, 20, 0, 0, tzinfo=timezone.utc)
+        if start >= legacy_anchor_start:
+            elapsed_days = (start - legacy_anchor_start).days
+            aligned_days = elapsed_days - (elapsed_days % 3)
+            start = legacy_anchor_start + timedelta(days=aligned_days)
+            epoch_hours = 72
+
+    end = start + timedelta(hours=epoch_hours)
     return {
         "competition_epoch_id": f"day_{start.date().isoformat()}_2000utc",
         "competition_epoch_start": start.isoformat(),
@@ -75,9 +85,9 @@ class ProviderRuntimeConfig:
     api_base_url: str
     internal_secret: str
     validator_id: str
-    chunk_count: int = 40
-    min_hands_per_chunk: int = 60
-    max_hands_per_chunk: int = 120
+    chunk_count: int = 120
+    min_hands_per_chunk: int = 72
+    max_hands_per_chunk: int = 160
     min_eval_hands: int = 40
     max_eval_hands: int = 70
     require_mixed: bool = True
@@ -108,9 +118,9 @@ class ProviderRuntimeConfig:
             api_base_url=api_base_url,
             internal_secret=internal_secret,
             validator_id=validator_id,
-            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "40"))),
-            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))),
-            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))),
+            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "120"))),
+            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "72"))),
+            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "160"))),
             min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "40"))),
             max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "70"))),
             require_mixed=_env_bool("POKER44_PROVIDER_REQUIRE_MIXED", True),
