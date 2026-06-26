@@ -212,3 +212,9 @@ hands_for_validator/poker_hands_from_rar.json
 
 # Local Weights & Biases runs/artifacts
 wandb/
+
+# Poker44 miner: keep local training data and trained weights out of the public repo
+data/
+models/
+*.joblib
+*.npz
