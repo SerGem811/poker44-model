@@ -131,6 +131,7 @@ async def _run_forward_cycle(validator) -> None:
     
     bt.logging.info(f"Processing {len(chunks)} chunks with labels: {batch_labels} (1=bot, 0=human)")
     bt.logging.info(f"Chunk sizes: {[len(chunk) for chunk in chunks]}")
+    validator.current_eval_sample_count = len(chunks)
     _record_served_chunk_fingerprints(
         validator,
         chunks=chunks,
@@ -577,7 +578,11 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
 
 
 def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndarray, list]:
-    window = getattr(validator, "reward_window", 20)
+    configured_window = int(getattr(validator, "reward_window", 0) or 0)
+    current_sample_count = int(getattr(validator, "current_eval_sample_count", 0) or 0)
+    window = configured_window if configured_window > 0 else current_sample_count
+    if window <= 0:
+        window = 1
     rewards: List[float] = []
     metrics: List[dict] = []
 
