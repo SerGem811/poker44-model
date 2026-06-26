@@ -94,9 +94,9 @@ public leaderboard surfaces derived from signed validator and network state.
 
 At the current production cadence:
 
-- competition epochs run for `72h`, anchored at `20:00 UTC`;
-- canonical eval chunks are managed in rolling `6h` windows inside that epoch;
-- the latest fully settled competition winner remains the canonical competition reference until the next `72h` settlement closes.
+- competition epochs run for `120h`, anchored at the active cycle close;
+- canonical eval chunks are managed in daily `24h` windows inside that epoch;
+- the latest fully settled competition winner remains the canonical competition reference until the next settlement closes.
 
 Settlement behavior now follows a platform-decided pattern:
 
@@ -105,7 +105,7 @@ Settlement behavior now follows a platform-decided pattern:
 - once the backend has settled at least one competition winner, the latest settled
   winner becomes the canonical competition vector for the current/vigente
   period, but validators apply a Swarm-style burn on top of it:
-  `97%` to `uid 0`, `3%` to the backend-provided winner vector;
+  `0%` to `uid 0`, `100%` to the backend-provided winner vector;
 - before the first settlement exists, the backend returns its explicit
   fallback vector (typically `uid 0`, which remains `100%` burned);
 - validators only fall back to local score-based weights if the backend is

@@ -42,6 +42,36 @@ def _compute_batches_hash(batches: Sequence[Mapping[str, Any]]) -> str:
 
 def _current_competition_epoch(now: Optional[datetime] = None) -> Dict[str, Any]:
     current = now or datetime.now(timezone.utc)
+    final_current_start = datetime(2026, 6, 22, 20, 0, 0, tzinfo=timezone.utc)
+    final_current_end = datetime(2026, 6, 27, 0, 0, 0, tzinfo=timezone.utc)
+    if final_current_start <= current < final_current_end:
+        return {
+            "competition_epoch_id": f"day_{final_current_start.date().isoformat()}_2000utc",
+            "competition_epoch_start": final_current_start.isoformat(),
+            "competition_epoch_end": final_current_end.isoformat(),
+            "competition_settlement_mode": "winner_take_all",
+            "competition_seconds_remaining": max(
+                0, int((final_current_end - current).total_seconds())
+            ),
+        }
+
+    next_anchor_start = final_current_end
+    if current >= next_anchor_start:
+        epoch_hours = 120
+        epoch_delta = timedelta(hours=epoch_hours)
+        elapsed_epochs = int(
+            (current - next_anchor_start).total_seconds() // epoch_delta.total_seconds()
+        )
+        start = next_anchor_start + elapsed_epochs * epoch_delta
+        end = start + epoch_delta
+        return {
+            "competition_epoch_id": f"day_{start.date().isoformat()}_{start.hour:02d}00utc",
+            "competition_epoch_start": start.isoformat(),
+            "competition_epoch_end": end.isoformat(),
+            "competition_settlement_mode": "winner_take_all",
+            "competition_seconds_remaining": max(0, int((end - current).total_seconds())),
+        }
+
     start = datetime(
         current.year,
         current.month,
@@ -85,11 +115,11 @@ class ProviderRuntimeConfig:
     api_base_url: str
     internal_secret: str
     validator_id: str
-    chunk_count: int = 40
-    min_hands_per_chunk: int = 40
-    max_hands_per_chunk: int = 70
-    min_eval_hands: int = 40
-    max_eval_hands: int = 70
+    chunk_count: int = 120
+    min_hands_per_chunk: int = 72
+    max_hands_per_chunk: int = 160
+    min_eval_hands: int = 120
+    max_eval_hands: int = 160
     require_mixed: bool = True
     attempt_publish_current: bool = True
     mark_evaluated: bool = True
@@ -118,11 +148,11 @@ class ProviderRuntimeConfig:
             api_base_url=api_base_url,
             internal_secret=internal_secret,
             validator_id=validator_id,
-            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "40"))),
-            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "40"))),
-            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "70"))),
-            min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "40"))),
-            max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "70"))),
+            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "120"))),
+            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "72"))),
+            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "160"))),
+            min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "120"))),
+            max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "160"))),
             require_mixed=_env_bool("POKER44_PROVIDER_REQUIRE_MIXED", True),
             attempt_publish_current=_env_bool("POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT", True),
             mark_evaluated=_env_bool("POKER44_PROVIDER_MARK_EVALUATED", True),

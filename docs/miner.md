@@ -25,8 +25,8 @@ Important: the miner does **not** receive labels.
 
 Current competition framing:
 
-- competition epochs run for `72h`;
-- active canonical evaluation windows run in `6h` blocks inside that epoch;
+- competition epochs run for `120h`;
+- active canonical evaluation windows run in daily `24h` blocks inside that epoch;
 - miners are still evaluated continuously through the same chunk-level contract.
 
 Released benchmark data is different:
