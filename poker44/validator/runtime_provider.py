@@ -85,9 +85,9 @@ class ProviderRuntimeConfig:
     api_base_url: str
     internal_secret: str
     validator_id: str
-    chunk_count: int = 120
-    min_hands_per_chunk: int = 72
-    max_hands_per_chunk: int = 160
+    chunk_count: int = 40
+    min_hands_per_chunk: int = 40
+    max_hands_per_chunk: int = 70
     min_eval_hands: int = 40
     max_eval_hands: int = 70
     require_mixed: bool = True
@@ -118,9 +118,9 @@ class ProviderRuntimeConfig:
             api_base_url=api_base_url,
             internal_secret=internal_secret,
             validator_id=validator_id,
-            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "120"))),
-            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "72"))),
-            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "160"))),
+            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "40"))),
+            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "40"))),
+            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "70"))),
             min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "40"))),
             max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "70"))),
             require_mixed=_env_bool("POKER44_PROVIDER_REQUIRE_MIXED", True),
