@@ -70,7 +70,7 @@ class Validator(BaseValidatorNeuron):
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(getattr(cfg, "poll_interval_seconds", 300)))
         )
-        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "120"))
+        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "100"))
         self.runtime_mode = str(
             os.getenv("POKER44_RUNTIME_MODE", "provider_runtime")
         ).strip().lower()
@@ -85,7 +85,7 @@ class Validator(BaseValidatorNeuron):
         self.forward_count = 0
         self.settings = cfg
         refresh_seconds = int(os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60)))
-        chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "120"))
+        chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "100"))
         self.chunk_batch_size = chunk_count
 
         provider_runtime_cfg = ProviderRuntimeConfig.from_env(

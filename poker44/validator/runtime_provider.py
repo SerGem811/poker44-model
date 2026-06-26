@@ -115,7 +115,7 @@ class ProviderRuntimeConfig:
     api_base_url: str
     internal_secret: str
     validator_id: str
-    chunk_count: int = 120
+    chunk_count: int = 100
     min_hands_per_chunk: int = 100
     max_hands_per_chunk: int = 100
     min_eval_hands: int = 120
@@ -148,7 +148,7 @@ class ProviderRuntimeConfig:
             api_base_url=api_base_url,
             internal_secret=internal_secret,
             validator_id=validator_id,
-            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "120"))),
+            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "100"))),
             min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "100"))),
             max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "100"))),
             min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "120"))),
