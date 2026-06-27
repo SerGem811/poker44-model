@@ -85,7 +85,7 @@ class Validator(BaseValidatorNeuron):
         self.forward_count = 0
         self.settings = cfg
         refresh_seconds = int(os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60)))
-        chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "100"))
+        chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "80"))
         self.chunk_batch_size = chunk_count
 
         provider_runtime_cfg = ProviderRuntimeConfig.from_env(
