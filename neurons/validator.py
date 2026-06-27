@@ -70,7 +70,7 @@ class Validator(BaseValidatorNeuron):
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(getattr(cfg, "poll_interval_seconds", 300)))
         )
-        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", "100"))
+        self.reward_window = 0
         self.runtime_mode = str(
             os.getenv("POKER44_RUNTIME_MODE", "provider_runtime")
         ).strip().lower()
@@ -85,8 +85,7 @@ class Validator(BaseValidatorNeuron):
         self.forward_count = 0
         self.settings = cfg
         refresh_seconds = int(os.getenv("POKER44_DATASET_REFRESH_SECONDS", str(60 * 60)))
-        chunk_count = int(os.getenv("POKER44_CHUNK_COUNT", "80"))
-        self.chunk_batch_size = chunk_count
+        self.chunk_batch_size = None
 
         provider_runtime_cfg = ProviderRuntimeConfig.from_env(
             default_validator_id=self.wallet.hotkey.ss58_address
@@ -105,7 +104,7 @@ class Validator(BaseValidatorNeuron):
         self.poll_interval = int(
             os.getenv("POKER44_POLL_INTERVAL_SECONDS", str(configured_poll_interval))
         )
-        self.reward_window = int(os.getenv("POKER44_REWARD_WINDOW", str(self.reward_window)))
+        self.reward_window = 0
         self.prediction_buffer = {}
         self.label_buffer = {}
         self.coverage_buffer = {}
@@ -185,8 +184,8 @@ class Validator(BaseValidatorNeuron):
             "netuid": self.config.netuid,
             "runtime_mode": getattr(self, "runtime_mode", "initializing"),
             "poll_interval": getattr(self, "poll_interval", None),
-            "reward_window": getattr(self, "reward_window", None),
-            "chunk_batch_size": getattr(self, "chunk_batch_size", None),
+            "reward_window": "backend_controlled",
+            "chunk_batch_size": "backend_controlled",
             "step": int(getattr(self, "step", 0)),
             "score_slots": int(len(getattr(self, "scores", []))) if hasattr(self, "scores") else 0,
             "nonzero_scores": int((getattr(self, "scores", []) != 0).sum())

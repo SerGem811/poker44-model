@@ -115,7 +115,6 @@ class ProviderRuntimeConfig:
     api_base_url: str
     internal_secret: str
     validator_id: str
-    chunk_count: int = 80
     min_hands_per_chunk: int = 100
     max_hands_per_chunk: int = 100
     min_eval_hands: int = 120
@@ -123,7 +122,7 @@ class ProviderRuntimeConfig:
     require_mixed: bool = True
     attempt_publish_current: bool = True
     mark_evaluated: bool = True
-    request_timeout_seconds: int = 60
+    request_timeout_seconds: int = 120
 
     @classmethod
     def from_env(cls, *, default_validator_id: str) -> "ProviderRuntimeConfig":
@@ -148,7 +147,6 @@ class ProviderRuntimeConfig:
             api_base_url=api_base_url,
             internal_secret=internal_secret,
             validator_id=validator_id,
-            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "80"))),
             min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "100"))),
             max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "100"))),
             min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "120"))),
@@ -156,7 +154,7 @@ class ProviderRuntimeConfig:
             require_mixed=_env_bool("POKER44_PROVIDER_REQUIRE_MIXED", True),
             attempt_publish_current=_env_bool("POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT", True),
             mark_evaluated=_env_bool("POKER44_PROVIDER_MARK_EVALUATED", True),
-            request_timeout_seconds=int(os.getenv("POKER44_PROVIDER_REQUEST_TIMEOUT_SECONDS", "60")),
+            request_timeout_seconds=int(os.getenv("POKER44_PROVIDER_REQUEST_TIMEOUT_SECONDS", "120")),
         )
 
     def public_summary(self) -> Dict[str, Any]:
@@ -164,7 +162,7 @@ class ProviderRuntimeConfig:
             "mode": "provider_runtime",
             "api_base_url": self.api_base_url,
             "validator_id": self.validator_id,
-            "chunk_count": self.chunk_count,
+            "chunk_count": "backend_controlled",
             "min_hands_per_chunk": self.min_hands_per_chunk,
             "max_hands_per_chunk": self.max_hands_per_chunk,
             "min_eval_hands": self.min_eval_hands,
@@ -344,7 +342,7 @@ class ProviderRuntimeDatasetProvider:
     def fetch_hand_batch(
         self,
         *,
-        limit: int = 80,
+        limit: int = 0,
         include_integrity: bool = True,
     ) -> List[LabeledHandBatch]:
         _ = include_integrity
@@ -389,7 +387,6 @@ class ProviderRuntimeDatasetProvider:
                         "/internal/eval/publish-current",
                         payload={
                             "validatorId": self.cfg.validator_id,
-                            "chunkCount": max(1, min(self.cfg.chunk_count, limit or self.cfg.chunk_count)),
                             "minHandsPerChunk": self.cfg.min_hands_per_chunk,
                             "maxHandsPerChunk": self.cfg.max_hands_per_chunk,
                             "requireMixed": self.cfg.require_mixed,
@@ -411,8 +408,6 @@ class ProviderRuntimeDatasetProvider:
             batches_raw = payload.get("batches", []) if isinstance(payload, dict) else []
             if not isinstance(batches_raw, list):
                 batches_raw = []
-            if limit > 0:
-                batches_raw = batches_raw[:limit]
 
             canonical_chunk_hash = (
                 str(payload.get("chunkHash") or "").strip() if isinstance(payload, dict) else ""
@@ -426,7 +421,7 @@ class ProviderRuntimeDatasetProvider:
                 {
                     "runtime_mode": "provider_runtime",
                     "batch_count": len(batches_raw),
-                    "requested_limit": limit,
+                    "requested_limit": "all",
                     "last_fetch_status": "ok" if batches_raw else "waiting_for_active_chunk",
                     "last_fetch_at": int(time.time()),
                     "active_chunk_id": str(payload.get("chunkId") or "") if isinstance(payload, dict) else "",

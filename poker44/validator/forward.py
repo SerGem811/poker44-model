@@ -56,9 +56,8 @@ async def _run_forward_cycle(validator) -> None:
     if hasattr(validator.provider, "refresh_if_due"):
         validator.provider.refresh_if_due()
 
-    # Fetch all configured chunks from the stable dataset snapshot.
-    chunk_limit = int(getattr(validator, "chunk_batch_size", 80))
-    batches = validator.provider.fetch_hand_batch(limit=chunk_limit)
+    # Fetch the full stable dataset snapshot selected by the backend.
+    batches = validator.provider.fetch_hand_batch()
     if not batches:
         bt.logging.info("No hands fetched from dataset; sleeping.")
         if wandb_helper is not None:
@@ -147,13 +146,18 @@ async def _run_forward_cycle(validator) -> None:
     # Create synapse with all chunks (now as list of dicts)
     synapse = DetectionSynapse(chunks=chunks)
     
-    # Get timeout from config
-    timeout = 20
+    # Larger canonical snapshots require more miner-side processing time.
+    timeout = 120.0
     if hasattr(validator.config, "neuron") and hasattr(validator.config.neuron, "timeout"):
         try:
             timeout = float(validator.config.neuron.timeout)
         except (ValueError, TypeError):
-            timeout = 20
+            timeout = 120.0
+    try:
+        timeout = float(os.getenv("POKER44_MINER_QUERY_TIMEOUT_SECONDS", str(timeout)))
+    except (ValueError, TypeError):
+        timeout = 120.0
+    timeout = max(30.0, timeout)
     
     total_hands = sum(len(chunk) for chunk in chunks)
     bt.logging.info(f"Querying {len(axons)} miners with {len(chunks)} chunks ({total_hands} total hands)...")
@@ -198,17 +202,18 @@ async def _run_forward_cycle(validator) -> None:
         try:
             scores_f = [float(s) for s in scores]
             
-            # Miners should return one score per chunk
             if len(scores_f) != len(chunks):
                 bt.logging.warning(
-                    f"Miner {uid} returned {len(scores_f)} scores but expected {len(chunks)} (one per chunk)"
+                    f"Miner {uid} returned {len(scores_f)} scores but expected {len(chunks)} "
+                    "(one per chunk); discarding incomplete response."
                 )
-                # Continue anyway, use what we have
-                min_len = min(len(scores_f), len(chunks))
-                scores_f = scores_f[:min_len]
-                effective_labels = batch_labels[:min_len]
-            else:
-                effective_labels = batch_labels
+                response_metadata[uid] = {
+                    "coverage_rate": 0.0,
+                    "latency_seconds": _extract_latency_seconds(resp),
+                }
+                validator.coverage_buffer.setdefault(uid, []).append(0.0)
+                continue
+            effective_labels = batch_labels
 
             coverage_rate = (
                 float(len(scores_f)) / float(expected_chunk_count)
@@ -578,9 +583,8 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
 
 
 def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndarray, list]:
-    configured_window = int(getattr(validator, "reward_window", 0) or 0)
     current_sample_count = int(getattr(validator, "current_eval_sample_count", 0) or 0)
-    window = configured_window if configured_window > 0 else current_sample_count
+    window = current_sample_count
     if window <= 0:
         window = 1
     rewards: List[float] = []
