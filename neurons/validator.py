@@ -184,8 +184,8 @@ class Validator(BaseValidatorNeuron):
             "netuid": self.config.netuid,
             "runtime_mode": getattr(self, "runtime_mode", "initializing"),
             "poll_interval": getattr(self, "poll_interval", None),
-            "reward_window": "backend_controlled",
-            "chunk_batch_size": "backend_controlled",
+            "reward_window": 0,
+            "chunk_batch_size": 0,
             "step": int(getattr(self, "step", 0)),
             "score_slots": int(len(getattr(self, "scores", []))) if hasattr(self, "scores") else 0,
             "nonzero_scores": int((getattr(self, "scores", []) != 0).sum())
