@@ -147,16 +147,16 @@ async def _run_forward_cycle(validator) -> None:
     synapse = DetectionSynapse(chunks=chunks)
     
     # Larger canonical snapshots require more miner-side processing time.
-    timeout = 120.0
+    timeout = 180.0
     if hasattr(validator.config, "neuron") and hasattr(validator.config.neuron, "timeout"):
         try:
             timeout = float(validator.config.neuron.timeout)
         except (ValueError, TypeError):
-            timeout = 120.0
+            timeout = 180.0
     try:
         timeout = float(os.getenv("POKER44_MINER_QUERY_TIMEOUT_SECONDS", str(timeout)))
     except (ValueError, TypeError):
-        timeout = 120.0
+        timeout = 180.0
     timeout = max(30.0, timeout)
     
     total_hands = sum(len(chunk) for chunk in chunks)

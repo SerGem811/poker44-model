@@ -77,7 +77,7 @@ def add_args(cls, parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--neuron.timeout",
         type=float,
-        default=120.0,
+        default=180.0,
         help="Timeout in seconds for each validator to miner query.",
     )
     parser.add_argument(

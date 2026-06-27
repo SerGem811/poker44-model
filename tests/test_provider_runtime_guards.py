@@ -81,7 +81,7 @@ class ProviderRuntimeGuardTests(unittest.TestCase):
         self.assertEqual(cfg.api_base_url, "http://127.0.0.1:3001")
         self.assertEqual(cfg.internal_secret, "")
         self.assertEqual(cfg.validator_id, "validator_hotkey")
-        self.assertEqual(cfg.request_timeout_seconds, 120)
+        self.assertEqual(cfg.request_timeout_seconds, 180)
 
     def test_accepts_real_internal_secret(self):
         with patch.dict(
@@ -97,7 +97,7 @@ class ProviderRuntimeGuardTests(unittest.TestCase):
         self.assertEqual(cfg.api_base_url, "http://127.0.0.1:3001")
         self.assertEqual(cfg.internal_secret, "real-secret-value")
         self.assertEqual(cfg.validator_id, "validator_hotkey")
-        self.assertEqual(cfg.request_timeout_seconds, 120)
+        self.assertEqual(cfg.request_timeout_seconds, 180)
 
     def test_provider_request_timeout_can_be_overridden(self):
         with patch.dict(
