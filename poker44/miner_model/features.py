@@ -82,8 +82,6 @@ FEATURE_NAMES: List[str] = [
     "aggression_factor",
     "action_type_entropy",
     # bet/raise sizing regularity (the strongest bot tell)
-    "size_mean_bb",
-    "size_std_bb",
     "size_cv_bb",
     "size_bucket_entropy",
     "size_modal_frac",
@@ -246,8 +244,6 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         raise_ / n_actions,
         aggression_factor,
         _entropy([fold, check, call, bet, raise_]),
-        size_mean,
-        size_std,
         size_cv,
         size_bucket_entropy,
         size_modal_frac,
