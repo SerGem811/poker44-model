@@ -218,3 +218,4 @@ data/
 models/
 *.joblib
 *.npz
+.secrets
