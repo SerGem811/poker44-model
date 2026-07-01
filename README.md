@@ -71,8 +71,8 @@ The competition framing should be understood as:
 
 At the current production cadence:
 
-- competitions run in rolling `72h` epochs anchored at `20:00 UTC`;
-- canonical evaluation material is published and refreshed in `6h` windows;
+- competitions run in rolling `120h` epochs anchored at the active cycle close;
+- canonical evaluation material is published and refreshed in daily `24h` windows;
 - the latest fully settled competition winner remains the canonical reference slot until the next settlement closes.
 
 In the current runtime, validators read the canonical competition weight

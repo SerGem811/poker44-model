@@ -30,7 +30,6 @@ from poker44.validator.constants import (
     BURN_FRACTION,
     KEEP_FRACTION,
     UID_ZERO,
-    WINNER_TAKE_ALL,
 )
 
 
@@ -56,9 +55,8 @@ async def _run_forward_cycle(validator) -> None:
     if hasattr(validator.provider, "refresh_if_due"):
         validator.provider.refresh_if_due()
 
-    # Fetch all configured chunks from the stable dataset snapshot.
-    chunk_limit = int(getattr(validator, "chunk_batch_size", 80))
-    batches = validator.provider.fetch_hand_batch(limit=chunk_limit)
+    # Fetch the full stable dataset snapshot selected by the backend.
+    batches = validator.provider.fetch_hand_batch()
     if not batches:
         bt.logging.info("No hands fetched from dataset; sleeping.")
         if wandb_helper is not None:
@@ -131,6 +129,7 @@ async def _run_forward_cycle(validator) -> None:
     
     bt.logging.info(f"Processing {len(chunks)} chunks with labels: {batch_labels} (1=bot, 0=human)")
     bt.logging.info(f"Chunk sizes: {[len(chunk) for chunk in chunks]}")
+    validator.current_eval_sample_count = len(chunks)
     _record_served_chunk_fingerprints(
         validator,
         chunks=chunks,
@@ -146,13 +145,18 @@ async def _run_forward_cycle(validator) -> None:
     # Create synapse with all chunks (now as list of dicts)
     synapse = DetectionSynapse(chunks=chunks)
     
-    # Get timeout from config
-    timeout = 20
+    # Larger canonical snapshots require more miner-side processing time.
+    timeout = 180.0
     if hasattr(validator.config, "neuron") and hasattr(validator.config.neuron, "timeout"):
         try:
             timeout = float(validator.config.neuron.timeout)
         except (ValueError, TypeError):
-            timeout = 20
+            timeout = 180.0
+    try:
+        timeout = float(os.getenv("POKER44_MINER_QUERY_TIMEOUT_SECONDS", str(timeout)))
+    except (ValueError, TypeError):
+        timeout = 180.0
+    timeout = max(30.0, timeout)
     
     total_hands = sum(len(chunk) for chunk in chunks)
     bt.logging.info(f"Querying {len(axons)} miners with {len(chunks)} chunks ({total_hands} total hands)...")
@@ -197,17 +201,18 @@ async def _run_forward_cycle(validator) -> None:
         try:
             scores_f = [float(s) for s in scores]
             
-            # Miners should return one score per chunk
             if len(scores_f) != len(chunks):
                 bt.logging.warning(
-                    f"Miner {uid} returned {len(scores_f)} scores but expected {len(chunks)} (one per chunk)"
+                    f"Miner {uid} returned {len(scores_f)} scores but expected {len(chunks)} "
+                    "(one per chunk); discarding incomplete response."
                 )
-                # Continue anyway, use what we have
-                min_len = min(len(scores_f), len(chunks))
-                scores_f = scores_f[:min_len]
-                effective_labels = batch_labels[:min_len]
-            else:
-                effective_labels = batch_labels
+                response_metadata[uid] = {
+                    "coverage_rate": 0.0,
+                    "latency_seconds": _extract_latency_seconds(resp),
+                }
+                validator.coverage_buffer.setdefault(uid, []).append(0.0)
+                continue
+            effective_labels = batch_labels
 
             coverage_rate = (
                 float(len(scores_f)) / float(expected_chunk_count)
@@ -577,7 +582,10 @@ def _get_candidate_miners(validator) -> Tuple[List[int], List]:
 
 
 def _compute_windowed_rewards(validator, miner_uids: List[int]) -> tuple[np.ndarray, list]:
-    window = getattr(validator, "reward_window", 20)
+    current_sample_count = int(getattr(validator, "current_eval_sample_count", 0) or 0)
+    window = current_sample_count
+    if window <= 0:
+        window = 1
     rewards: List[float] = []
     metrics: List[dict] = []
 
@@ -696,37 +704,6 @@ def _select_weight_targets(reward_map: Dict[int, float]) -> tuple[List[int], np.
 
     sorted_rewards = sorted(reward_map.items(), key=lambda item: (-item[1], item[0]))
     winner_uid, winner_reward = sorted_rewards[0]
-
-    if not WINNER_TAKE_ALL:
-        positive = [(uid, max(0.0, float(reward))) for uid, reward in sorted_rewards]
-        positive = [(uid, reward) for uid, reward in positive if reward > 0.0]
-
-        if not positive:
-            bt.logging.info(
-                "No miner achieved positive reward; assigning 100%% to UID 0."
-            )
-            return [UID_ZERO], np.asarray([1.0], dtype=np.float32)
-
-        podium = positive[:3]
-        podium_splits = [0.5, 0.3, 0.2][: len(podium)]
-
-        if BURN_EMISSIONS:
-            uids = [UID_ZERO] + [uid for uid, _ in podium]
-            rewards = [BURN_FRACTION] + [KEEP_FRACTION * frac for frac in podium_splits]
-            bt.logging.info(
-                f"Podium mode + burn: UID 0 gets {BURN_FRACTION * 100:.2f}%, "
-                f"{KEEP_FRACTION * 100:.2f}% split across top {len(podium)} miner(s) "
-                f"with fixed shares {podium_splits}."
-            )
-            return uids, np.asarray(rewards, dtype=np.float32)
-
-        uids = [uid for uid, _ in podium]
-        rewards = podium_splits
-        bt.logging.info(
-            f"Podium mode: 100% split across top {len(podium)} miner(s) "
-            f"with fixed shares {podium_splits}."
-        )
-        return uids, np.asarray(rewards, dtype=np.float32)
 
     if winner_reward <= 0.0:
         bt.logging.info("No miner achieved positive reward; assigning 100%% to UID 0.")
