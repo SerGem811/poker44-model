@@ -153,7 +153,7 @@ if _TORCH_AVAILABLE:
                 d_model, n_heads, dim_feedforward=d_model * 2,
                 dropout=dropout, batch_first=True, norm_first=True
             )
-            self.encoder = nn.TransformerEncoder(enc_layer, 1)
+            self.encoder = nn.TransformerEncoder(enc_layer, 1, enable_nested_tensor=False)
             self.attn_q = nn.Linear(d_model, 1)
 
         def forward(self, x: torch.Tensor, padding_mask: torch.Tensor) -> torch.Tensor:
@@ -191,23 +191,24 @@ if _TORCH_AVAILABLE:
             )
 
         def encode_session(self, session_tensor: torch.Tensor) -> torch.Tensor:
-            """session_tensor: (N_hands, MAX_ACTIONS, 4) int64 on the right device."""
-            n_hands = session_tensor.shape[0]
-            # Build padding mask for actions: row is padded when action_type == ACT_PAD
-            act_pad_mask = (session_tensor[:, :, 0] == _ACT_PAD)  # (N_hands, T)
-            # Clamp hands where ALL actions are padded → padded hand
-            hand_is_pad = act_pad_mask.all(dim=-1)  # (N_hands,)
+            """session_tensor: (MAX_HANDS, MAX_ACTIONS, 4) int64 on the right device."""
+            # Find real hands: at least one action position is not ACT_PAD
+            act_pad_mask = (session_tensor[:, :, 0] == _ACT_PAD)  # (MAX_HANDS, MAX_ACTIONS)
+            hand_is_real = ~act_pad_mask.all(dim=-1)  # (MAX_HANDS,) True for non-empty hands
 
-            # Encode each hand
-            hand_vecs = self.hand_encoder(
-                session_tensor, act_pad_mask
-            )  # (N_hands, d_model)
+            if not hand_is_real.any():
+                # Empty session — return zero vector
+                return torch.zeros(1, self.d_model, dtype=torch.float32)
 
-            # Zero out padded hands
-            hand_vecs = hand_vecs * (~hand_is_pad).float().unsqueeze(-1)
+            # Only encode real hands to avoid NaN from all-padded attention
+            real_hands = session_tensor[hand_is_real]           # (n_real, MAX_ACTIONS, 4)
+            real_act_pad = act_pad_mask[hand_is_real]           # (n_real, MAX_ACTIONS)
 
-            hand_input = hand_vecs.unsqueeze(0)  # (1, N_hands, d_model)
-            hand_pad_mask = hand_is_pad.unsqueeze(0)  # (1, N_hands)
+            hand_vecs = self.hand_encoder(real_hands, real_act_pad)  # (n_real, d_model)
+
+            n_real = hand_vecs.shape[0]
+            hand_input = hand_vecs.unsqueeze(0)                       # (1, n_real, d_model)
+            hand_pad_mask = torch.zeros(1, n_real, dtype=torch.bool)  # no padding
 
             chunk_vec = self.chunk_encoder(hand_input, hand_pad_mask)  # (1, d_model)
             return chunk_vec  # (1, d_model)
