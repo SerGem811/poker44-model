@@ -27,7 +27,10 @@ import math
 import os
 import time
 from pathlib import Path
+import warnings
 from typing import List, Optional, Tuple
+
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 import bittensor as bt
 

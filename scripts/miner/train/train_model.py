@@ -136,11 +136,19 @@ def _make_estimator():
 def train_ensemble(
     X_train: np.ndarray,
     y_train: np.ndarray,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
+    X_val: np.ndarray | None = None,
+    y_val: np.ndarray | None = None,
     blend: float = 0.5,
 ) -> EnsembleClassifier:
-    """Fit all 5 base models then calibrate on the validation set."""
+    """Fit all 5 base models then calibrate on the validation set.
+
+    When X_val/y_val are omitted an internal 80/20 stratified split is used
+    so callers (e.g. auto_retrain.py) can pass just (X, y).
+    """
+    if X_val is None or y_val is None:
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_train, y_train, test_size=0.20, stratify=y_train, random_state=0
+        )
     named_models = _make_base_models()
     fitted: list = []
 

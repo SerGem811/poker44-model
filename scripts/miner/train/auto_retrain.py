@@ -65,28 +65,22 @@ def fit_calibrated(X, y):
 
 
 def best_safe_operating_point(proba_hold, y_hold):
-    """Pick the t_star on the holdout with zero cliff failures and max reward."""
-    best = (None, -1.0, 1.0)  # (t_star, reward, cliff_rate)
+    """Pick the t_star on the holdout with max simulated reward.
+
+    Under the current rank-first reward (0.75*AP + 0.25*recall_at_fpr) there
+    is no FPR cliff, so we simply maximise simulated reward across the grid.
+    """
+    best = (None, -1.0, 0.0)  # (t_star, reward, fpr_est)
+    rng = np.random.default_rng(0)
+    n = len(proba_hold)
     for t in T_STAR_GRID:
         shaped = np.array([shape_risk_score(p, t) for p in proba_hold])
-        # reuse the validator's exact windowed reward via simulate
         r = simulate_windowed_reward(shaped, y_hold, window=20, trials=1500)
-        # estimate cliff rate at this t directly
-        rng = np.random.default_rng(0)
-        n = len(shaped)
-        if n >= 20:
-            fprs = []
-            for _ in range(1500):
-                idx = rng.choice(n, 20, replace=False)
-                hh = (y_hold[idx] == 0)
-                fp = ((shaped[idx] >= 0.5) & hh).sum()
-                neg = max(1, hh.sum())
-                fprs.append(fp / neg)
-            cliff = float((np.array(fprs) >= 0.10).mean())
-        else:
-            cliff = 0.0
-        if cliff == 0.0 and r > best[1]:
-            best = (t, r, cliff)
+        # track average FPR for logging only (not used to gate decisions)
+        humans = y_hold == 0
+        fpr_est = float(((shaped >= 0.5) & humans).sum() / max(1, humans.sum()))
+        if r > best[1]:
+            best = (t, r, fpr_est)
     return best
 
 
@@ -163,7 +157,7 @@ def main() -> int:
     ap = average_precision_score(yho, p_ho)
     t_star, r_cand, _ = best_safe_operating_point(p_ho, yho)
     if t_star is None:
-        log(f"KEEP: no FPR-safe operating point found on holdout (AP={ap:.3f}). Not deploying.")
+        log(f"KEEP: could not find operating point on holdout (AP={ap:.3f}). Not deploying.")
         return 0
     log(f"candidate: kind={kind} AP={ap:.4f} best_t_star={t_star} holdout_reward={r_cand:.4f}")
 
