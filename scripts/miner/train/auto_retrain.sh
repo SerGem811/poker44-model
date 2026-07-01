@@ -1,7 +1,7 @@
 #!/bin/bash
 # Daily safe auto-retrain wrapper for cron. Logs to logs/auto_retrain.log.
-# Promotes a new model only if it beats the running one on unseen data and is
-# FPR-cliff-safe; otherwise leaves the live miner untouched.
+# Promotes a new model only if it beats the running one on unseen data;
+# otherwise leaves the live miner untouched.
 set -euo pipefail
 
 REPO="/root/work/Poker44-subnet"

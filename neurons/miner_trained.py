@@ -48,12 +48,15 @@ _DEFAULT_MODEL_PATH = os.getenv("POKER44_MODEL_PATH", "models/poker44_gbdt.jobli
 
 
 class TrainedModel:
-    """Thin wrapper around a persisted sklearn/LightGBM estimator + scoring head."""
+    """Wrapper around GBDT ensemble + optional Transformer scorer."""
 
-    def __init__(self, estimator, head: ScoringHead, feature_names: List[str]):
+    def __init__(self, estimator, head: ScoringHead, feature_names: List[str],
+                 transformer=None, transformer_weight: float = 0.5):
         self.estimator = estimator
         self.head = head
         self.feature_names = feature_names
+        self.transformer = transformer          # TransformerScorer or None
+        self.transformer_weight = transformer_weight
 
     @classmethod
     def load(cls, path: str) -> Optional["TrainedModel"]:
@@ -68,19 +71,34 @@ class TrainedModel:
                 estimator=blob["estimator"],
                 head=ScoringHead.from_dict(blob.get("scoring_head", {})),
                 feature_names=blob.get("feature_names", FEATURE_NAMES),
+                transformer=blob.get("transformer"),
+                transformer_weight=float(blob.get("transformer_weight", 0.5)),
             )
         except Exception as exc:  # pragma: no cover - defensive load
             bt.logging.warning(f"Failed to load model from {path}: {exc}")
             return None
 
-    def proba(self, feats: List[List[float]]) -> List[float]:
+    def proba(self, feats: List[List[float]], raw_chunks: Optional[List[list]] = None) -> List[float]:
         import numpy as np
 
         x = np.asarray(feats, dtype=float)
         if hasattr(self.estimator, "predict_proba"):
-            return [float(v) for v in self.estimator.predict_proba(x)[:, 1]]
-        raw = self.estimator.predict(x)
-        return [float(1.0 / (1.0 + math.exp(-float(v)))) for v in raw]
+            gbdt_p = self.estimator.predict_proba(x)[:, 1]
+        else:
+            raw = self.estimator.predict(x)
+            gbdt_p = np.array([1.0 / (1.0 + math.exp(-float(v))) for v in raw])
+
+        # Blend with Transformer if available
+        if self.transformer is not None and raw_chunks is not None:
+            try:
+                t_p = self.transformer.predict_proba(raw_chunks)[:, 1]
+                w = self.transformer_weight
+                combined = (1.0 - w) * gbdt_p + w * t_p
+                return [float(v) for v in combined]
+            except Exception as exc:
+                bt.logging.warning(f"Transformer inference failed: {exc}; using GBDT only")
+
+        return [float(v) for v in gbdt_p]
 
 
 def _heuristic_proba(feats: List[float]) -> float:
@@ -149,7 +167,7 @@ class TrainedMiner(BaseMinerNeuron):
     def _score_chunks(self, chunks: List[list]) -> List[float]:
         feats = [extract_chunk_features(chunk) for chunk in chunks]
         if self.model is not None:
-            probs = self.model.proba(feats)
+            probs = self.model.proba(feats, raw_chunks=chunks)
             return self.model.head.score_many(probs)
         probs = [_heuristic_proba(f) for f in feats]
         return [round(shape_risk_score(p, self.fallback_head.t_star, self.fallback_head.sharpness), 6) for p in probs]
