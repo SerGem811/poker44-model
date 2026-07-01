@@ -42,6 +42,36 @@ def _compute_batches_hash(batches: Sequence[Mapping[str, Any]]) -> str:
 
 def _current_competition_epoch(now: Optional[datetime] = None) -> Dict[str, Any]:
     current = now or datetime.now(timezone.utc)
+    final_current_start = datetime(2026, 6, 22, 20, 0, 0, tzinfo=timezone.utc)
+    final_current_end = datetime(2026, 6, 27, 0, 0, 0, tzinfo=timezone.utc)
+    if final_current_start <= current < final_current_end:
+        return {
+            "competition_epoch_id": f"day_{final_current_start.date().isoformat()}_2000utc",
+            "competition_epoch_start": final_current_start.isoformat(),
+            "competition_epoch_end": final_current_end.isoformat(),
+            "competition_settlement_mode": "winner_take_all",
+            "competition_seconds_remaining": max(
+                0, int((final_current_end - current).total_seconds())
+            ),
+        }
+
+    next_anchor_start = final_current_end
+    if current >= next_anchor_start:
+        epoch_hours = 120
+        epoch_delta = timedelta(hours=epoch_hours)
+        elapsed_epochs = int(
+            (current - next_anchor_start).total_seconds() // epoch_delta.total_seconds()
+        )
+        start = next_anchor_start + elapsed_epochs * epoch_delta
+        end = start + epoch_delta
+        return {
+            "competition_epoch_id": f"day_{start.date().isoformat()}_{start.hour:02d}00utc",
+            "competition_epoch_start": start.isoformat(),
+            "competition_epoch_end": end.isoformat(),
+            "competition_settlement_mode": "winner_take_all",
+            "competition_seconds_remaining": max(0, int((end - current).total_seconds())),
+        }
+
     start = datetime(
         current.year,
         current.month,
@@ -54,13 +84,23 @@ def _current_competition_epoch(now: Optional[datetime] = None) -> Dict[str, Any]
     if current < start:
         start -= timedelta(days=1)
 
-    anchor_start = datetime(2026, 5, 12, 20, 0, 0, tzinfo=timezone.utc)
-    if start >= anchor_start:
-        elapsed_days = (start - anchor_start).days
-        aligned_days = elapsed_days - (elapsed_days % 3)
-        start = anchor_start + timedelta(days=aligned_days)
+    epoch_hours = 24
 
-    end = start + timedelta(hours=72)
+    current_anchor_start = datetime(2026, 6, 17, 20, 0, 0, tzinfo=timezone.utc)
+    if start >= current_anchor_start:
+        elapsed_days = (start - current_anchor_start).days
+        aligned_days = elapsed_days - (elapsed_days % 5)
+        start = current_anchor_start + timedelta(days=aligned_days)
+        epoch_hours = 120
+    else:
+        legacy_anchor_start = datetime(2026, 5, 12, 20, 0, 0, tzinfo=timezone.utc)
+        if start >= legacy_anchor_start:
+            elapsed_days = (start - legacy_anchor_start).days
+            aligned_days = elapsed_days - (elapsed_days % 3)
+            start = legacy_anchor_start + timedelta(days=aligned_days)
+            epoch_hours = 72
+
+    end = start + timedelta(hours=epoch_hours)
     return {
         "competition_epoch_id": f"day_{start.date().isoformat()}_2000utc",
         "competition_epoch_start": start.isoformat(),
@@ -75,15 +115,14 @@ class ProviderRuntimeConfig:
     api_base_url: str
     internal_secret: str
     validator_id: str
-    chunk_count: int = 40
-    min_hands_per_chunk: int = 60
-    max_hands_per_chunk: int = 120
-    min_eval_hands: int = 40
-    max_eval_hands: int = 70
+    min_hands_per_chunk: int = 100
+    max_hands_per_chunk: int = 100
+    min_eval_hands: int = 120
+    max_eval_hands: int = 100
     require_mixed: bool = True
     attempt_publish_current: bool = True
     mark_evaluated: bool = True
-    request_timeout_seconds: int = 60
+    request_timeout_seconds: int = 180
 
     @classmethod
     def from_env(cls, *, default_validator_id: str) -> "ProviderRuntimeConfig":
@@ -108,15 +147,14 @@ class ProviderRuntimeConfig:
             api_base_url=api_base_url,
             internal_secret=internal_secret,
             validator_id=validator_id,
-            chunk_count=max(1, int(os.getenv("POKER44_CHUNK_COUNT", "40"))),
-            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "60"))),
-            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "120"))),
-            min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "40"))),
-            max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "70"))),
+            min_hands_per_chunk=max(1, int(os.getenv("POKER44_MIN_HANDS_PER_CHUNK", "100"))),
+            max_hands_per_chunk=max(1, int(os.getenv("POKER44_MAX_HANDS_PER_CHUNK", "100"))),
+            min_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MIN_EVAL_HANDS", "120"))),
+            max_eval_hands=max(0, int(os.getenv("POKER44_PROVIDER_MAX_EVAL_HANDS", "100"))),
             require_mixed=_env_bool("POKER44_PROVIDER_REQUIRE_MIXED", True),
             attempt_publish_current=_env_bool("POKER44_PROVIDER_ATTEMPT_PUBLISH_CURRENT", True),
             mark_evaluated=_env_bool("POKER44_PROVIDER_MARK_EVALUATED", True),
-            request_timeout_seconds=int(os.getenv("POKER44_PROVIDER_REQUEST_TIMEOUT_SECONDS", "60")),
+            request_timeout_seconds=int(os.getenv("POKER44_PROVIDER_REQUEST_TIMEOUT_SECONDS", "180")),
         )
 
     def public_summary(self) -> Dict[str, Any]:
@@ -124,7 +162,7 @@ class ProviderRuntimeConfig:
             "mode": "provider_runtime",
             "api_base_url": self.api_base_url,
             "validator_id": self.validator_id,
-            "chunk_count": self.chunk_count,
+            "chunk_count": "backend_controlled",
             "min_hands_per_chunk": self.min_hands_per_chunk,
             "max_hands_per_chunk": self.max_hands_per_chunk,
             "min_eval_hands": self.min_eval_hands,
@@ -304,7 +342,7 @@ class ProviderRuntimeDatasetProvider:
     def fetch_hand_batch(
         self,
         *,
-        limit: int = 80,
+        limit: int = 0,
         include_integrity: bool = True,
     ) -> List[LabeledHandBatch]:
         _ = include_integrity
@@ -349,7 +387,6 @@ class ProviderRuntimeDatasetProvider:
                         "/internal/eval/publish-current",
                         payload={
                             "validatorId": self.cfg.validator_id,
-                            "chunkCount": max(1, min(self.cfg.chunk_count, limit or self.cfg.chunk_count)),
                             "minHandsPerChunk": self.cfg.min_hands_per_chunk,
                             "maxHandsPerChunk": self.cfg.max_hands_per_chunk,
                             "requireMixed": self.cfg.require_mixed,
@@ -371,8 +408,6 @@ class ProviderRuntimeDatasetProvider:
             batches_raw = payload.get("batches", []) if isinstance(payload, dict) else []
             if not isinstance(batches_raw, list):
                 batches_raw = []
-            if limit > 0:
-                batches_raw = batches_raw[:limit]
 
             canonical_chunk_hash = (
                 str(payload.get("chunkHash") or "").strip() if isinstance(payload, dict) else ""
@@ -386,7 +421,7 @@ class ProviderRuntimeDatasetProvider:
                 {
                     "runtime_mode": "provider_runtime",
                     "batch_count": len(batches_raw),
-                    "requested_limit": limit,
+                    "requested_limit": "all",
                     "last_fetch_status": "ok" if batches_raw else "waiting_for_active_chunk",
                     "last_fetch_at": int(time.time()),
                     "active_chunk_id": str(payload.get("chunkId") or "") if isinstance(payload, dict) else "",
