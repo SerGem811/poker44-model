@@ -12,10 +12,11 @@ So the only learnable signal is *behavioural regularity*. Bots tend to:
   * keep aggression/continuation patterns unusually consistent,
   * deviate from the human distribution of action-type mixes and street depth.
 
-Feature design (145 total):
+Feature design (151 total):
   - 19 per-hand feature values × 7 statistics = 133 stat features
   - 8 chunk-level signature features
   - 4 global behavior rate features
+  - 6 temporal consistency features (lag-1 autocorrelation + half-delta)
 
 All features are scale-invariant (fractions, CVs, entropies, bucket-based).
 No absolute BB magnitude features are used — that would cause score saturation
@@ -129,11 +130,36 @@ def _bb_bucket_index(value: float) -> int:
     return min(range(len(_BB_BUCKETS)), key=lambda i: abs(_BB_BUCKETS[i] - value))
 
 
+def _lag1_autocorr(values: Sequence[float]) -> float:
+    """Pearson lag-1 autocorrelation. Bots show high positive autocorr (consistent hand-to-hand)."""
+    n = len(values)
+    if n < 4:
+        return 0.0
+    x = [float(v) for v in values[:-1]]
+    y = [float(v) for v in values[1:]]
+    mx = sum(x) / len(x)
+    my = sum(y) / len(y)
+    num = sum((a - mx) * (b - my) for a, b in zip(x, y))
+    dx = math.sqrt(sum((a - mx) ** 2 for a in x) + 1e-12)
+    dy = math.sqrt(sum((b - my) ** 2 for b in y) + 1e-12)
+    r = num / (dx * dy)
+    return max(-1.0, min(1.0, r))
+
+
+def _half_delta(values: Sequence[float]) -> float:
+    """Abs difference of means between first and second half. Bots show near-zero drift."""
+    n = len(values)
+    if n < 4:
+        return 0.0
+    mid = n // 2
+    first = sum(values[:mid]) / mid
+    second = sum(values[mid:]) / max(1, n - mid)
+    return abs(first - second)
 
 
 # ---------------------------------------------------------------------------
-# FEATURE_NAMES — exactly 145 entries
-# 133 stat features (19 per-hand × 7 stats) + 8 chunk + 4 global
+# FEATURE_NAMES — exactly 151 entries
+# 133 stat features (19 per-hand × 7 stats) + 8 chunk + 4 global + 6 temporal
 # ---------------------------------------------------------------------------
 
 # 133 stat features: for each of 19 per-hand features, 7 stats in order.
@@ -160,6 +186,16 @@ FEATURE_NAMES += [
     "global_action_entropy",
     "global_actor_entropy",
     "long_hand_rate",
+]
+
+# 6 temporal consistency features (hand-to-hand patterns)
+FEATURE_NAMES += [
+    "lag1_autocorr_aggression",   # lag-1 autocorr of per-hand aggro fraction
+    "lag1_autocorr_fold",         # lag-1 autocorr of per-hand fold fraction
+    "lag1_autocorr_size_cv",      # lag-1 autocorr of per-hand size CV
+    "aggro_half_delta",           # |first_half_aggro - second_half_aggro|
+    "fold_half_delta",            # |first_half_fold - second_half_fold|
+    "size_cv_half_delta",         # |first_half_size_cv - second_half_size_cv|
 ]
 
 
@@ -303,12 +339,13 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 145-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 151-float vector.
 
     Feature layout:
       [0:133]   per-hand statistics: 19 features × 7 stats (mean/std/min/max/q10/q50/q90)
       [133:141] chunk-level signature features (8)
       [141:145] global behavior rate features (4)
+      [145:151] temporal consistency features (6)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -462,8 +499,23 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         long_hand_rate,
     ]
 
+    # --- Temporal consistency features (6) ---
+    # Use per-hand aggression, fold, and size_cv sequences.
+    aggro_frac_ph = [ph[3] + ph[4] for ph in per_hand]   # frac_bet + frac_raise
+    fold_frac_ph  = [ph[0] for ph in per_hand]            # frac_fold
+    size_cv_ph    = [ph[7] for ph in per_hand]            # size_cv
+
+    temporal_features = [
+        _lag1_autocorr(aggro_frac_ph),
+        _lag1_autocorr(fold_frac_ph),
+        _lag1_autocorr(size_cv_ph),
+        _half_delta(aggro_frac_ph),
+        _half_delta(fold_frac_ph),
+        _half_delta(size_cv_ph),
+    ]
+
     # --- Assemble final vector ---
-    vec = stat_features + chunk_sig_features + global_rate_features
+    vec = stat_features + chunk_sig_features + global_rate_features + temporal_features
 
     # Guard against any non-finite leakage so downstream models stay stable.
     return [float(v) if math.isfinite(v) else 0.0 for v in vec]
