@@ -166,8 +166,19 @@ class TrainedMiner(BaseMinerNeuron):
 
     def _score_chunks(self, chunks: List[list]) -> List[float]:
         feats = [extract_chunk_features(chunk) for chunk in chunks]
+        if chunks:
+            import numpy as np
+            n0 = len(chunks[0])
+            f0 = feats[0]
+            fn = FEATURE_NAMES
+            keys = ['n_hands', 'mean_frac_fold', 'mean_size_cv', 'top_bb_bucket_share',
+                    'max_aggression_factor', 'mean_aggression_factor', 'aggro_cv_across_hands']
+            kv = {k: round(f0[fn.index(k)], 4) for k in keys if k in fn}
+            bt.logging.info(f"[DEBUG] chunk0: n_hands_in_chunk={n0}, features={kv}")
         if self.model is not None:
             probs = self.model.proba(feats, raw_chunks=chunks)
+            if chunks:
+                bt.logging.info(f"[DEBUG] raw_prob[0]={probs[0]:.4f}, raw_prob_range=[{min(probs):.4f},{max(probs):.4f}]")
             return self.model.head.score_many(probs)
         probs = [_heuristic_proba(f) for f in feats]
         return [round(shape_risk_score(p, self.fallback_head.t_star, self.fallback_head.sharpness), 6) for p in probs]
