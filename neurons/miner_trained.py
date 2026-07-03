@@ -165,18 +165,41 @@ class TrainedMiner(BaseMinerNeuron):
         )
 
     def _score_chunks(self, chunks: List[list]) -> List[float]:
+        import numpy as np
         feats = [extract_chunk_features(chunk) for chunk in chunks]
         if chunks:
-            import numpy as np
             n0 = len(chunks[0])
             f0 = feats[0]
             fn = FEATURE_NAMES
             keys = ['n_hands', 'mean_frac_fold', 'mean_size_cv', 'top_bb_bucket_share',
-                    'max_aggression_factor', 'mean_aggression_factor', 'aggro_cv_across_hands']
+                    'lag1_autocorr_fold', 'lag1_autocorr_size_cv', 'aggro_cv_across_hands',
+                    'fold_half_delta', 'size_cv_half_delta']
             kv = {k: round(f0[fn.index(k)], 4) for k in keys if k in fn}
-            bt.logging.info(f"[DEBUG] chunk0: n_hands_in_chunk={n0}, features={kv}")
+            bt.logging.info(f"[DEBUG] chunk0: n_hands={n0}, features={kv}")
+            # One-shot dump of all live feature vectors for offline analysis
+            dump_path = "data/live_features_dump.npz"
+            if not Path(dump_path).exists():
+                try:
+                    X = np.array(feats)
+                    np.savez(dump_path, X=X, feature_names=np.array(fn))
+                    bt.logging.info(f"[DEBUG] Saved live feature dump ({X.shape}) → {dump_path}")
+                except Exception as exc:
+                    bt.logging.warning(f"[DEBUG] Feature dump failed: {exc}")
         if self.model is not None:
             probs = self.model.proba(feats, raw_chunks=chunks)
+            # Post-process: demote rar=0.5 sessions. Training bots always have rar=0 (OOD signal).
+            # Multiplier 0.80 creates clean separation: rar=0.5 max_adj < rar=0 min in live data.
+            try:
+                rar_idx = FEATURE_NAMES.index('max_raise_after_raise_frac')
+                probs = [
+                    p * 0.80 if feats[i][rar_idx] > 0.3 else p
+                    for i, p in enumerate(probs)
+                ]
+                n_demoted = sum(1 for f in feats if f[rar_idx] > 0.3)
+                if chunks and n_demoted > 0:
+                    bt.logging.info(f"[DEBUG] rar_demote: {n_demoted}/{len(chunks)} sessions (rar=0.5) × 0.80")
+            except (ValueError, IndexError):
+                pass
             if chunks:
                 bt.logging.info(f"[DEBUG] raw_prob[0]={probs[0]:.4f}, raw_prob_range=[{min(probs):.4f},{max(probs):.4f}]")
             return self.model.head.score_many(probs)
