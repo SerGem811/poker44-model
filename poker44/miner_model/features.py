@@ -12,11 +12,13 @@ So the only learnable signal is *behavioural regularity*. Bots tend to:
   * keep aggression/continuation patterns unusually consistent,
   * deviate from the human distribution of action-type mixes and street depth.
 
-Feature design (151 total):
+Feature design (233 total):
   - 19 per-hand feature values × 7 statistics = 133 stat features
-  - 8 chunk-level signature features
+  - 10 schema per-hand features × 7 statistics = 70 stat features
+  - 8 chunk-level signature features (original)
   - 4 global behavior rate features
   - 6 temporal consistency features (lag-1 autocorrelation + half-delta)
+  - 12 chunk-level sequence-collision features (novel)
 
 All features are scale-invariant (fractions, CVs, entropies, bucket-based).
 No absolute BB magnitude features are used — that would cause score saturation
@@ -59,6 +61,20 @@ _PER_HAND_FEATURE_NAMES = [
     "pot_growth_mean",      # 16
     "reach_turn_plus",      # 17
     "raise_after_raise_frac",  # 18
+]
+
+# Names for 10 additional schema per-hand features (indices 19-28).
+_SCHEMA_PER_HAND_FEATURE_NAMES = [
+    "schema_actor_switch_rate",     # 19: how often acting seat changes
+    "schema_actor_run_max_share",   # 20: longest same-actor run / n_actions
+    "schema_action_run_max_share",  # 21: longest same-action-type run / n_actions
+    "schema_street_entropy",        # 22: entropy of street distribution
+    "schema_preflop_share",         # 23: preflop actions / total actions
+    "schema_postflop_share",        # 24: postflop actions / total actions
+    "schema_pot_monotonic_rate",    # 25: fraction of consecutive pot pairs that increase
+    "schema_raise_to_share",        # 26: fraction of actions with raise_to present
+    "schema_nonzero_amount_share",  # 27: fraction of actions with non-zero amount
+    "schema_starting_stack_iqr_bb", # 28: IQR of starting stacks in BB units
 ]
 
 _STATS = ("mean", "std", "min", "max", "q10", "q50", "q90")
@@ -158,13 +174,23 @@ def _half_delta(values: Sequence[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# FEATURE_NAMES — exactly 151 entries
-# 133 stat features (19 per-hand × 7 stats) + 8 chunk + 4 global + 6 temporal
+# FEATURE_NAMES — 233 entries
+# 133 stat features (19 per-hand × 7 stats)
+# 70 schema stat features (10 schema per-hand × 7 stats)
+# 8 chunk-level signature features (original)
+# 4 global behavior rate features
+# 6 temporal consistency features
+# 12 chunk-level sequence-collision features (novel)
 # ---------------------------------------------------------------------------
 
 # 133 stat features: for each of 19 per-hand features, 7 stats in order.
 FEATURE_NAMES: List[str] = []
 for _feat in _PER_HAND_FEATURE_NAMES:
+    for _stat in _STATS:
+        FEATURE_NAMES.append(f"{_stat}_{_feat}")
+
+# 70 schema stat features: for each of 10 schema per-hand features, 7 stats.
+for _feat in _SCHEMA_PER_HAND_FEATURE_NAMES:
     for _stat in _STATS:
         FEATURE_NAMES.append(f"{_stat}_{_feat}")
 
@@ -197,6 +223,157 @@ FEATURE_NAMES += [
     "fold_half_delta",            # |first_half_fold - second_half_fold|
     "size_cv_half_delta",         # |first_half_size_cv - second_half_size_cv|
 ]
+
+# 12 chunk-level sequence-collision features
+# These capture how repetitively a bot replays the same action sequences across hands.
+FEATURE_NAMES += [
+    "seq_action_sig_top_share",        # fraction of hands with the most common action-type sequence
+    "seq_action_sig_unique_share",     # unique action-type sequences / n_hands
+    "seq_actor_sig_top_share",         # fraction of hands with the most common actor-seat sequence
+    "seq_actor_sig_unique_share",      # unique actor-seat sequences / n_hands
+    "seq_street_sig_top_share",        # fraction of hands with the most common street sequence
+    "seq_street_sig_unique_share",     # unique street sequences / n_hands
+    "seq_amount_bucket_sig_top_share", # fraction of hands with the most common amount-bucket sequence
+    "seq_amount_bucket_sig_unique_share", # unique amount-bucket sequences / n_hands
+    "seq_high_aggression_hand_rate",   # fraction of hands with aggression_share >= 0.35
+    "seq_low_action_entropy_hand_rate",# fraction of hands with action_entropy <= 0.35
+    "seq_high_actor_entropy_hand_rate",# fraction of hands with actor_entropy >= 0.75
+    "seq_long_action_hand_rate",       # fraction of hands with >= 12 actions
+]
+
+
+def _compute_schema_per_hand_features(hand: Dict[str, Any]) -> List[float]:
+    """Compute 10 additional schema per-hand features (indices 19-28)."""
+    actions = hand.get("actions") or []
+    players = hand.get("players") or []
+    meta = hand.get("metadata") or {}
+
+    action_types: List[str] = []
+    actor_seats: List[int] = []
+    street_names: List[str] = []
+    amounts: List[float] = []
+    pot_after_seq: List[float] = []
+    raise_to_count = 0
+
+    for a in actions:
+        if not isinstance(a, dict):
+            continue
+        at = str(a.get("action_type", "") or "").lower()
+        if not at:
+            continue
+        action_types.append(at)
+        try:
+            seat = int(a.get("actor_seat", 0) or 0)
+        except (TypeError, ValueError):
+            seat = 0
+        if seat > 0:
+            actor_seats.append(seat)
+        street_names.append(str(a.get("street", "") or "").lower())
+        amt = float(a.get("normalized_amount_bb", 0.0) or 0.0)
+        amounts.append(max(0.0, amt))
+        pa = float(a.get("pot_after", 0.0) or 0.0)
+        pot_after_seq.append(max(0.0, pa))
+        if a.get("raise_to") is not None:
+            raise_to_count += 1
+
+    n_actions = max(len(action_types), 1)
+    n_actors = max(len(actor_seats), 1)
+
+    # 19: actor_switch_rate — how often consecutive actors differ
+    actor_switches = sum(1 for i in range(1, len(actor_seats)) if actor_seats[i] != actor_seats[i - 1])
+    feat19 = actor_switches / max(len(actor_seats) - 1, 1)
+
+    # 20: actor_run_max_share — longest run of same actor / n_actor_actions
+    feat20 = _max_run_share_list(actor_seats)
+
+    # 21: action_run_max_share — longest run of same action type / n_actions
+    feat21 = _max_run_share_list(action_types)
+
+    # 22: street_entropy — Shannon entropy over street distribution
+    street_counts = Counter(s for s in street_names if s)
+    feat22 = _entropy(list(street_counts.values()))
+
+    # 23: preflop_share — preflop actions / total
+    preflop_n = sum(1 for s in street_names if s == "preflop")
+    feat23 = preflop_n / n_actions
+
+    # 24: postflop_share — non-preflop, non-empty actions / total
+    postflop_n = sum(1 for s in street_names if s and s != "preflop")
+    feat24 = postflop_n / n_actions
+
+    # 25: pot_monotonic_rate — fraction of consecutive pot_after pairs that increase
+    if len(pot_after_seq) >= 2:
+        mono = sum(1 for i in range(1, len(pot_after_seq)) if pot_after_seq[i] + 1e-9 >= pot_after_seq[i - 1])
+        feat25 = mono / (len(pot_after_seq) - 1)
+    else:
+        feat25 = 0.0
+
+    # 26: raise_to_share — fraction of actions that have a raise_to field
+    feat26 = raise_to_count / n_actions
+
+    # 27: nonzero_amount_share — fraction of actions with positive amount
+    nonzero = sum(1 for v in amounts if v > 0)
+    feat27 = nonzero / n_actions
+
+    # 28: starting_stack_iqr_bb — IQR of starting stacks (normalized to BB units)
+    # Use meta.bb if available, else assume $0.02
+    try:
+        bb_val = float(meta.get("bb", 0.02) or 0.02)
+        if bb_val <= 0:
+            bb_val = 0.02
+    except (TypeError, ValueError):
+        bb_val = 0.02
+    stacks_bb = []
+    for p in players:
+        if not isinstance(p, dict):
+            continue
+        try:
+            s = float(p.get("starting_stack", 0.0) or 0.0)
+            stacks_bb.append(s / bb_val)
+        except (TypeError, ValueError):
+            pass
+    if len(stacks_bb) >= 2:
+        sv = sorted(stacks_bb)
+        q75 = _stats(sv)[3]  # max used as upper bound in _stats
+        # Compute proper IQR
+        n_s = len(sv)
+        q75_v = sv[int(round(0.75 * (n_s - 1)))]
+        q25_v = sv[int(round(0.25 * (n_s - 1)))]
+        feat28 = max(0.0, q75_v - q25_v)
+    else:
+        feat28 = 0.0
+
+    return [feat19, feat20, feat21, feat22, feat23, feat24, feat25, feat26, feat27, feat28]
+
+
+def _max_run_share_list(values: List) -> float:
+    """Longest run of equal consecutive values / len(values). Returns 0 for empty."""
+    if not values:
+        return 0.0
+    longest = 1
+    cur = 1
+    for i in range(1, len(values)):
+        if values[i] == values[i - 1]:
+            cur += 1
+            longest = max(longest, cur)
+        else:
+            cur = 1
+    return longest / len(values)
+
+
+def _amount_bucket_label(value: float) -> str:
+    """Coarse bucket label for a normalized_amount_bb value."""
+    if value <= 0.0:
+        return "z"
+    if value <= 0.5:
+        return "xs"
+    if value <= 1.0:
+        return "s"
+    if value <= 2.0:
+        return "m"
+    if value <= 5.0:
+        return "l"
+    return "xl"
 
 
 def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
@@ -339,13 +516,15 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 151-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 233-float vector.
 
     Feature layout:
-      [0:133]   per-hand statistics: 19 features × 7 stats (mean/std/min/max/q10/q50/q90)
-      [133:141] chunk-level signature features (8)
-      [141:145] global behavior rate features (4)
-      [145:151] temporal consistency features (6)
+      [0:133]   per-hand statistics: 19 features × 7 stats
+      [133:203] schema per-hand statistics: 10 features × 7 stats
+      [203:211] chunk-level signature features (8, original)
+      [211:215] global behavior rate features (4)
+      [215:221] temporal consistency features (6)
+      [221:233] sequence-collision features (12, novel)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -360,6 +539,14 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
     for fi in range(n_per):
         col = [per_hand[hi][fi] for hi in range(len(hands))]
         st = _stats(col)  # (mean, std, min, max, q10, q50, q90)
+        stat_features.extend(st)
+
+    # --- 70 schema stat features: 10 × 7 ---
+    schema_per_hand: List[List[float]] = [_compute_schema_per_hand_features(h) for h in hands]
+    n_schema_per = len(_SCHEMA_PER_HAND_FEATURE_NAMES)  # 10
+    for fi in range(n_schema_per):
+        col = [schema_per_hand[hi][fi] for hi in range(len(hands))]
+        st = _stats(col)
         stat_features.extend(st)
 
     # --- Chunk-level signature features (8) ---
@@ -514,8 +701,79 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         _half_delta(size_cv_ph),
     ]
 
+    # --- Sequence-collision features (12) ---
+    # Compute full-hand action/actor/street/amount-bucket sequence signatures
+    # and measure how repetitive these are across all hands in the chunk.
+    action_sigs: List[tuple] = []
+    actor_sigs: List[tuple] = []
+    street_sigs: List[tuple] = []
+    amount_bucket_sigs: List[tuple] = []
+    high_aggression_count = 0
+    low_entropy_count = 0
+    high_actor_entropy_count = 0
+    long_action_count = 0
+
+    for h, schema_ph in zip(hands, schema_per_hand):
+        h_actions = h.get("actions") or []
+        at_seq = tuple(
+            str(a.get("action_type", "") or "").lower()
+            for a in h_actions if isinstance(a, dict) and a.get("action_type")
+        )
+        actor_seq = tuple(
+            int(a.get("actor_seat", 0) or 0)
+            for a in h_actions if isinstance(a, dict) and (a.get("actor_seat") or 0) > 0
+        )
+        street_seq = tuple(
+            str(a.get("street", "") or "").lower()
+            for a in h_actions if isinstance(a, dict) and a.get("action_type")
+        )
+        amt_bucket_seq = tuple(
+            _amount_bucket_label(float(a.get("normalized_amount_bb", 0.0) or 0.0))
+            for a in h_actions if isinstance(a, dict) and a.get("action_type")
+        )
+        action_sigs.append(at_seq)
+        actor_sigs.append(actor_seq)
+        street_sigs.append(street_seq)
+        amount_bucket_sigs.append(amt_bucket_seq)
+
+        # Per-hand threshold rates (use schema features already computed)
+        n_at = max(len(at_seq), 1)
+        n_aggro_h = sum(1 for t in at_seq if t in _AGGRO)
+        aggr_share = n_aggro_h / n_at
+        at_entropy = _entropy(list(Counter(at_seq).values()))
+        actor_ent = _entropy(list(Counter(actor_seq).values()))
+        if aggr_share >= 0.35:
+            high_aggression_count += 1
+        if at_entropy <= 0.35:
+            low_entropy_count += 1
+        if actor_ent >= 0.75:
+            high_actor_entropy_count += 1
+        if len(at_seq) >= 12:
+            long_action_count += 1
+
+    n_hands_f = float(n_hands)
+    action_sig_ctr = Counter(action_sigs)
+    actor_sig_ctr = Counter(actor_sigs)
+    street_sig_ctr = Counter(street_sigs)
+    amount_sig_ctr = Counter(amount_bucket_sigs)
+
+    collision_features = [
+        max(action_sig_ctr.values()) / n_hands_f if action_sig_ctr else 0.0,
+        len(action_sig_ctr) / n_hands_f,
+        max(actor_sig_ctr.values()) / n_hands_f if actor_sig_ctr else 0.0,
+        len(actor_sig_ctr) / n_hands_f,
+        max(street_sig_ctr.values()) / n_hands_f if street_sig_ctr else 0.0,
+        len(street_sig_ctr) / n_hands_f,
+        max(amount_sig_ctr.values()) / n_hands_f if amount_sig_ctr else 0.0,
+        len(amount_sig_ctr) / n_hands_f,
+        high_aggression_count / n_hands_f,
+        low_entropy_count / n_hands_f,
+        high_actor_entropy_count / n_hands_f,
+        long_action_count / n_hands_f,
+    ]
+
     # --- Assemble final vector ---
-    vec = stat_features + chunk_sig_features + global_rate_features + temporal_features
+    vec = stat_features + chunk_sig_features + global_rate_features + temporal_features + collision_features
 
     # Guard against any non-finite leakage so downstream models stay stable.
     return [float(v) if math.isfinite(v) else 0.0 for v in vec]
