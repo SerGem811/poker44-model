@@ -12,17 +12,18 @@ So the only learnable signal is *behavioural regularity*. Bots tend to:
   * keep aggression/continuation patterns unusually consistent,
   * deviate from the human distribution of action-type mixes and street depth.
 
-Feature design (233 total):
+Feature design (289 total):
   - 19 per-hand feature values × 7 statistics = 133 stat features
   - 10 schema per-hand features × 7 statistics = 70 stat features
+  - 8 extra per-hand features × 7 statistics = 56 stat features (blind share,
+    unique actor ratio, street count, player count, absolute BB sizing, stacks)
   - 8 chunk-level signature features (original)
   - 4 global behavior rate features
   - 6 temporal consistency features (lag-1 autocorrelation + half-delta)
   - 12 chunk-level sequence-collision features (novel)
 
-All features are scale-invariant (fractions, CVs, entropies, bucket-based).
-No absolute BB magnitude features are used — that would cause score saturation
-on live data where the BB distribution differs from training data.
+The extra per-hand features use BB-normalized values (amount_bb, stacks/bb)
+since the validator consistently normalizes these across all stake levels.
 
 This module is pure-python + optional numpy, fully deterministic, and is the
 *same* code path used for both training and live inference.
@@ -75,6 +76,19 @@ _SCHEMA_PER_HAND_FEATURE_NAMES = [
     "schema_raise_to_share",        # 26: fraction of actions with raise_to present
     "schema_nonzero_amount_share",  # 27: fraction of actions with non-zero amount
     "schema_starting_stack_iqr_bb", # 28: IQR of starting stacks in BB units
+]
+
+# Names for 8 supplemental per-hand features (indices 29-36).
+# These capture blind actions, absolute bet sizing, stack depth, and player count.
+_EXTRA_PER_HAND_FEATURE_NAMES = [
+    "extra_blind_share",         # 29: (SB+BB) / all_actions_incl_blinds
+    "extra_unique_actor_share",  # 30: unique_actors / n_actor_actions
+    "extra_street_count",        # 31: number of distinct streets in the hand
+    "extra_n_players",           # 32: number of players in the hand
+    "extra_amount_mean_bb",      # 33: mean bet/raise amount in BB
+    "extra_amount_q90_bb",       # 34: 90th pct bet/raise amount in BB
+    "extra_stack_mean_bb",       # 35: mean starting stack in BB
+    "extra_stack_std_bb",        # 36: std of starting stacks in BB
 ]
 
 _STATS = ("mean", "std", "min", "max", "q10", "q50", "q90")
@@ -174,9 +188,10 @@ def _half_delta(values: Sequence[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# FEATURE_NAMES — 233 entries
+# FEATURE_NAMES — 289 entries
 # 133 stat features (19 per-hand × 7 stats)
 # 70 schema stat features (10 schema per-hand × 7 stats)
+# 56 extra stat features (8 extra per-hand × 7 stats)
 # 8 chunk-level signature features (original)
 # 4 global behavior rate features
 # 6 temporal consistency features
@@ -191,6 +206,11 @@ for _feat in _PER_HAND_FEATURE_NAMES:
 
 # 70 schema stat features: for each of 10 schema per-hand features, 7 stats.
 for _feat in _SCHEMA_PER_HAND_FEATURE_NAMES:
+    for _stat in _STATS:
+        FEATURE_NAMES.append(f"{_stat}_{_feat}")
+
+# 56 extra stat features: for each of 8 extra per-hand features, 7 stats.
+for _feat in _EXTRA_PER_HAND_FEATURE_NAMES:
     for _stat in _STATS:
         FEATURE_NAMES.append(f"{_stat}_{_feat}")
 
@@ -361,6 +381,104 @@ def _max_run_share_list(values: List) -> float:
     return longest / len(values)
 
 
+def _compute_extra_per_hand_features(hand: Dict[str, Any]) -> List[float]:
+    """Compute 8 supplemental per-hand features (indices 29-36)."""
+    actions = hand.get("actions") or []
+    players = hand.get("players") or []
+    meta = hand.get("metadata") or {}
+
+    try:
+        bb_val = float(meta.get("bb", 0.02) or 0.02)
+        if bb_val <= 0:
+            bb_val = 0.02
+    except (TypeError, ValueError):
+        bb_val = 0.02
+
+    all_types: List[str] = []
+    actor_seats_all: List[int] = []
+    streets_set: set = set()
+    bet_raise_amounts: List[float] = []
+
+    _BLIND_TYPES = {"small_blind", "big_blind"}
+    _ALL_TYPES = {"fold", "check", "call", "bet", "raise", "small_blind", "big_blind"}
+
+    for a in actions:
+        if not isinstance(a, dict):
+            continue
+        at = str(a.get("action_type", "") or "").lower()
+        if at not in _ALL_TYPES:
+            continue
+        all_types.append(at)
+
+        try:
+            seat = int(a.get("actor_seat", 0) or 0)
+        except (TypeError, ValueError):
+            seat = 0
+        if seat > 0:
+            actor_seats_all.append(seat)
+
+        street = str(a.get("street", "") or "").lower()
+        if street:
+            streets_set.add(street)
+
+        amt = float(a.get("normalized_amount_bb", 0.0) or 0.0)
+        if at in ("bet", "raise") and amt > 0:
+            bet_raise_amounts.append(amt)
+
+    n_all = max(len(all_types), 1)
+    n_actor_actions = max(len(actor_seats_all), 1)
+
+    # 29: blind_share — (SB+BB) / all_actions_incl_blinds
+    blind_n = sum(1 for t in all_types if t in _BLIND_TYPES)
+    feat29 = blind_n / n_all
+
+    # 30: unique_actor_share — distinct actors / actor-action count
+    feat30 = len(set(actor_seats_all)) / n_actor_actions
+
+    # 31: street_count — number of distinct streets played
+    feat31 = float(len(streets_set))
+
+    # 32: n_players — number of players in the hand
+    feat32 = float(len([p for p in players if isinstance(p, dict)]))
+
+    # 33: amount_mean_bb — mean bet/raise amount in BB (validator normalises)
+    if bet_raise_amounts:
+        feat33 = sum(bet_raise_amounts) / len(bet_raise_amounts)
+    else:
+        feat33 = 0.0
+
+    # 34: amount_q90_bb — 90th pct bet/raise amount in BB
+    if bet_raise_amounts:
+        feat34 = _stats(bet_raise_amounts)[6]  # q90 is index 6
+    else:
+        feat34 = 0.0
+
+    # 35: stack_mean_bb — mean starting stack in BB
+    stacks_bb = []
+    for p in players:
+        if not isinstance(p, dict):
+            continue
+        try:
+            s = float(p.get("starting_stack", 0.0) or 0.0)
+            stacks_bb.append(s / bb_val)
+        except (TypeError, ValueError):
+            pass
+    if stacks_bb:
+        feat35 = sum(stacks_bb) / len(stacks_bb)
+    else:
+        feat35 = 0.0
+
+    # 36: stack_std_bb — std of starting stacks in BB
+    if len(stacks_bb) >= 2:
+        mean_s = feat35
+        var_s = sum((x - mean_s) ** 2 for x in stacks_bb) / len(stacks_bb)
+        feat36 = math.sqrt(max(0.0, var_s))
+    else:
+        feat36 = 0.0
+
+    return [feat29, feat30, feat31, feat32, feat33, feat34, feat35, feat36]
+
+
 def _amount_bucket_label(value: float) -> str:
     """Coarse bucket label for a normalized_amount_bb value."""
     if value <= 0.0:
@@ -516,15 +634,16 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 233-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 289-float vector.
 
     Feature layout:
       [0:133]   per-hand statistics: 19 features × 7 stats
       [133:203] schema per-hand statistics: 10 features × 7 stats
-      [203:211] chunk-level signature features (8, original)
-      [211:215] global behavior rate features (4)
-      [215:221] temporal consistency features (6)
-      [221:233] sequence-collision features (12, novel)
+      [203:259] extra per-hand statistics: 8 features × 7 stats
+      [259:267] chunk-level signature features (8, original)
+      [267:271] global behavior rate features (4)
+      [271:277] temporal consistency features (6)
+      [277:289] sequence-collision features (12, novel)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -546,6 +665,14 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
     n_schema_per = len(_SCHEMA_PER_HAND_FEATURE_NAMES)  # 10
     for fi in range(n_schema_per):
         col = [schema_per_hand[hi][fi] for hi in range(len(hands))]
+        st = _stats(col)
+        stat_features.extend(st)
+
+    # --- 56 extra stat features: 8 × 7 ---
+    extra_per_hand: List[List[float]] = [_compute_extra_per_hand_features(h) for h in hands]
+    n_extra_per = len(_EXTRA_PER_HAND_FEATURE_NAMES)  # 8
+    for fi in range(n_extra_per):
+        col = [extra_per_hand[hi][fi] for hi in range(len(hands))]
         st = _stats(col)
         stat_features.extend(st)
 
