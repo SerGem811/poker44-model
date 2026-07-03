@@ -54,3 +54,35 @@ class EnsembleClassifier:
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
+
+
+class OOFStackedEnsemble:
+    """N-model ensemble with OOF-trained logistic regression meta-learner.
+
+    Kept in the poker44 package so joblib can unpickle it from any working
+    directory without needing the training script on sys.path.
+    """
+
+    def __init__(self, base_models: dict, meta_lr, calibrator: BlendedIsotonicCalibrator):
+        self.base_models = base_models        # {name: clf}
+        self.meta_lr = meta_lr               # LogisticRegression or None
+        self.calibrator = calibrator         # used as fallback if meta_lr is None
+
+    def _stack_proba(self, X: np.ndarray) -> np.ndarray:
+        """Return (n_samples, n_models) matrix of base model predictions."""
+        return np.column_stack([
+            clf.predict_proba(X)[:, 1]
+            for clf in self.base_models.values()
+        ])
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        stacked = self._stack_proba(X)
+        if self.meta_lr is not None:
+            p = self.meta_lr.predict_proba(stacked)[:, 1]
+        else:
+            avg = stacked.mean(axis=1)
+            p = np.clip(self.calibrator.transform(avg), 0.0, 1.0)
+        return np.column_stack([1.0 - p, p])
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
