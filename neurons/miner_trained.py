@@ -187,19 +187,6 @@ class TrainedMiner(BaseMinerNeuron):
                     bt.logging.warning(f"[DEBUG] Feature dump failed: {exc}")
         if self.model is not None:
             probs = self.model.proba(feats, raw_chunks=chunks)
-            # Post-process: demote rar=0.5 sessions. Training bots always have rar=0 (OOD signal).
-            # Multiplier 0.80 creates clean separation: rar=0.5 max_adj < rar=0 min in live data.
-            try:
-                rar_idx = FEATURE_NAMES.index('max_raise_after_raise_frac')
-                probs = [
-                    p * 0.80 if feats[i][rar_idx] > 0.3 else p
-                    for i, p in enumerate(probs)
-                ]
-                n_demoted = sum(1 for f in feats if f[rar_idx] > 0.3)
-                if chunks and n_demoted > 0:
-                    bt.logging.info(f"[DEBUG] rar_demote: {n_demoted}/{len(chunks)} sessions (rar=0.5) × 0.80")
-            except (ValueError, IndexError):
-                pass
             if chunks:
                 bt.logging.info(f"[DEBUG] raw_prob[0]={probs[0]:.4f}, raw_prob_range=[{min(probs):.4f},{max(probs):.4f}]")
             return self.model.head.score_many(probs)
