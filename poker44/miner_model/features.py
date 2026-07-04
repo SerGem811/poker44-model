@@ -12,14 +12,14 @@ So the only learnable signal is *behavioural regularity*. Bots tend to:
   * keep aggression/continuation patterns unusually consistent,
   * deviate from the human distribution of action-type mixes and street depth.
 
-Feature design (289 total):
+Feature design (295 total):
   - 19 per-hand feature values × 7 statistics = 133 stat features
   - 10 schema per-hand features × 7 statistics = 70 stat features
   - 8 extra per-hand features × 7 statistics = 56 stat features (blind share,
     unique actor ratio, street count, player count, absolute BB sizing, stacks)
   - 8 chunk-level signature features (original)
   - 4 global behavior rate features
-  - 6 temporal consistency features (lag-1 autocorrelation + half-delta)
+  - 12 temporal consistency features (lag-1/2 autocorr, half-delta, trend slope)
   - 12 chunk-level sequence-collision features (novel)
 
 The extra per-hand features use BB-normalized values (amount_bb, stacks/bb)
@@ -160,13 +160,13 @@ def _bb_bucket_index(value: float) -> int:
     return min(range(len(_BB_BUCKETS)), key=lambda i: abs(_BB_BUCKETS[i] - value))
 
 
-def _lag1_autocorr(values: Sequence[float]) -> float:
-    """Pearson lag-1 autocorrelation. Bots show high positive autocorr (consistent hand-to-hand)."""
+def _lagk_autocorr(values: Sequence[float], k: int = 1) -> float:
+    """Pearson lag-k autocorrelation. Bots show consistent hand-to-hand patterns."""
     n = len(values)
-    if n < 4:
+    if n < k + 3:
         return 0.0
-    x = [float(v) for v in values[:-1]]
-    y = [float(v) for v in values[1:]]
+    x = [float(v) for v in values[:-k]]
+    y = [float(v) for v in values[k:]]
     mx = sum(x) / len(x)
     my = sum(y) / len(y)
     num = sum((a - mx) * (b - my) for a, b in zip(x, y))
@@ -174,6 +174,28 @@ def _lag1_autocorr(values: Sequence[float]) -> float:
     dy = math.sqrt(sum((b - my) ** 2 for b in y) + 1e-12)
     r = num / (dx * dy)
     return max(-1.0, min(1.0, r))
+
+
+def _lag1_autocorr(values: Sequence[float]) -> float:
+    return _lagk_autocorr(values, 1)
+
+
+def _lag2_autocorr(values: Sequence[float]) -> float:
+    return _lagk_autocorr(values, 2)
+
+
+def _trend_slope(values: Sequence[float]) -> float:
+    """Normalized linear regression slope over the session. Bots show near-zero drift."""
+    n = len(values)
+    if n < 4:
+        return 0.0
+    mx = (n - 1) / 2.0
+    my = sum(values) / n
+    num = sum((i - mx) * (values[i] - my) for i in range(n))
+    denom = sum((i - mx) ** 2 for i in range(n))
+    if denom < 1e-12:
+        return 0.0
+    return (num / denom) / (abs(my) + 1e-9)
 
 
 def _half_delta(values: Sequence[float]) -> float:
@@ -188,13 +210,13 @@ def _half_delta(values: Sequence[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# FEATURE_NAMES — 289 entries
+# FEATURE_NAMES — 295 entries
 # 133 stat features (19 per-hand × 7 stats)
 # 70 schema stat features (10 schema per-hand × 7 stats)
 # 56 extra stat features (8 extra per-hand × 7 stats)
 # 8 chunk-level signature features (original)
 # 4 global behavior rate features
-# 6 temporal consistency features
+# 12 temporal consistency features (lag-1/2 autocorr, half-delta, trend slope)
 # 12 chunk-level sequence-collision features (novel)
 # ---------------------------------------------------------------------------
 
@@ -234,7 +256,7 @@ FEATURE_NAMES += [
     "long_hand_rate",
 ]
 
-# 6 temporal consistency features (hand-to-hand patterns)
+# 12 temporal consistency features (hand-to-hand patterns)
 FEATURE_NAMES += [
     "lag1_autocorr_aggression",   # lag-1 autocorr of per-hand aggro fraction
     "lag1_autocorr_fold",         # lag-1 autocorr of per-hand fold fraction
@@ -242,6 +264,12 @@ FEATURE_NAMES += [
     "aggro_half_delta",           # |first_half_aggro - second_half_aggro|
     "fold_half_delta",            # |first_half_fold - second_half_fold|
     "size_cv_half_delta",         # |first_half_size_cv - second_half_size_cv|
+    "lag2_autocorr_aggression",   # lag-2 autocorr of per-hand aggro fraction
+    "lag2_autocorr_fold",         # lag-2 autocorr of per-hand fold fraction
+    "lag2_autocorr_size_cv",      # lag-2 autocorr of per-hand size CV
+    "trend_slope_aggression",     # normalised linear slope of aggro fraction over session
+    "trend_slope_fold",           # normalised linear slope of fold fraction over session
+    "trend_slope_size_cv",        # normalised linear slope of size CV over session
 ]
 
 # 12 chunk-level sequence-collision features
@@ -568,8 +596,8 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
     feat4 = raise_ / max(1, n_actions)
     # 5: action_entropy
     feat5 = _entropy([fold, check, call, bet, raise_])
-    # 6: aggression_factor
-    feat6 = aggro / max(1e-9, passive)
+    # 6: aggression_factor — clamp denominator to 1 to avoid billion-scale values when passive=0
+    feat6 = aggro / max(1, passive)
     # 7: size_cv = CV of bet/raise normalized_amount_bb
     if sizes:
         s_mean = sum(sizes) / len(sizes)
@@ -608,7 +636,7 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
     feat13 = hero_aggro / max(1, hero_n_actions)
     # 14: hero_aggression_factor = hero(bet+raise) / hero(check+call)
     hero_passive = hero_counts.get("check", 0) + hero_counts.get("call", 0)
-    feat14 = hero_aggro / max(1e-9, hero_passive)
+    feat14 = hero_aggro / max(1, hero_passive)
     # 15: hero_size_cv = CV of hero bet/raise sizes
     if hero_sizes:
         hs_mean = sum(hero_sizes) / len(hero_sizes)
@@ -634,7 +662,7 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 289-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 295-float vector.
 
     Feature layout:
       [0:133]   per-hand statistics: 19 features × 7 stats
@@ -642,8 +670,8 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
       [203:259] extra per-hand statistics: 8 features × 7 stats
       [259:267] chunk-level signature features (8, original)
       [267:271] global behavior rate features (4)
-      [271:277] temporal consistency features (6)
-      [277:289] sequence-collision features (12, novel)
+      [271:283] temporal consistency features (12: lag1/2 autocorr, half-delta, trend slope)
+      [283:295] sequence-collision features (12, novel)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -826,6 +854,12 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         _half_delta(aggro_frac_ph),
         _half_delta(fold_frac_ph),
         _half_delta(size_cv_ph),
+        _lag2_autocorr(aggro_frac_ph),
+        _lag2_autocorr(fold_frac_ph),
+        _lag2_autocorr(size_cv_ph),
+        _trend_slope(aggro_frac_ph),
+        _trend_slope(fold_frac_ph),
+        _trend_slope(size_cv_ph),
     ]
 
     # --- Sequence-collision features (12) ---
