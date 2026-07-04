@@ -25,19 +25,19 @@ ultimately rank 1.
 
 ## 2. Current state (one glance)
 
-- **Model**: `models/poker44_gbdt.joblib` — **7-model OOF stacked ensemble** (LightGBM ×3 + ExtraTrees + RandomForest + XGBoost + CatBoost) + TransformerScorer blend.
+- **Model**: `models/poker44_gbdt.joblib` — **7-model OOF stacked ensemble, pure GBDT** (LightGBM ×3 + ExtraTrees + RandomForest + XGBoost + CatBoost). No transformer blend.
   - Class: `OOFStackedEnsemble` in `poker44/miner_model/ensemble.py`
-  - TransformerScorer: d_model=64, 2-layer hand encoder + 1-layer chunk encoder (`poker44/miner_model/transformer.py`)
-  - Features: **289 scale-invariant behavioral features**
+  - Features: **295 scale-invariant behavioral features** (fixed aggression_factor overflow + lag-2 autocorr + trend-slope)
     - 19 per-hand × 7 stats = 133 (core behavioral)
     - 10 schema per-hand × 7 = 70 (schema/collision)
     - 8 extra per-hand × 7 = 56 (additional behavioral)
     - 8 chunk-signature + 4 global + 6 temporal + 12 collision = 30 (chunk-level)
-  - GBDT holdout AP: **1.0000**; Transformer holdout AP: **0.8619**; Blend AP: **1.0000**
-  - Transformer weight: **0.15** (saved for testing; GBDT dominates on benchmark)
+    - 6 new: lag-2 autocorr (3) + trend-slope (3) = 6
+  - Holdout AP: **0.9963** (568 sessions, 1040 augmented, 2026-07-04)
+  - OOF AP (meta-learner): **0.9956**; best single AUROC: 0.9979
   - The model file is git-ignored (weights stay local; only code is published)
-- **Live state (epoch day_2026-07-02_1200utc)**:
-  Rank ≈ 39, composite ≈ 0.487
+- **Live state (epoch day_2026-07-04)**:
+  Rank ≈ 39, composite ≈ 0.487 (pre-deploy)
 - **Competition leaders**: rank-1 phasberg/poker44-model-v5 (0.632), rank-2 phasberg/poker44-model-v11 (0.610)
 - **Manifest**: `transparent`, `manifestReviewFailed=False` (originality OK).
 - **Automation**: cron runs `auto_retrain.sh` nightly (01:00 UTC) and `monitor_round.sh`
