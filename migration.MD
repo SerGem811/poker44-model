@@ -25,16 +25,20 @@ ultimately rank 1.
 
 ## 2. Current state (one glance)
 
-- **Model**: `models/poker44_gbdt.joblib` — **5-way ensemble** (LightGBM ×3 + ExtraTrees + RandomForest)
-  + BlendedIsotonicCalibrator + monotonic scoring head.
-  - Features: **145 scale-invariant behavioral features** (19 per-hand × 7 stats = 133 + 8 chunk signatures + 4 global rates)
-  - AP: **0.8164** on benchmark holdout; live score spread **0.355–0.762** (not saturated)
+- **Model**: `models/poker44_gbdt.joblib` — **7-model OOF stacked ensemble** (LightGBM ×3 + ExtraTrees + RandomForest + XGBoost + CatBoost) + TransformerScorer blend.
+  - Class: `OOFStackedEnsemble` in `poker44/miner_model/ensemble.py`
+  - TransformerScorer: d_model=64, 2-layer hand encoder + 1-layer chunk encoder (`poker44/miner_model/transformer.py`)
+  - Features: **289 scale-invariant behavioral features**
+    - 19 per-hand × 7 stats = 133 (core behavioral)
+    - 10 schema per-hand × 7 = 70 (schema/collision)
+    - 8 extra per-hand × 7 = 56 (additional behavioral)
+    - 8 chunk-signature + 4 global + 6 temporal + 12 collision = 30 (chunk-level)
+  - GBDT holdout AP: **1.0000**; Transformer holdout AP: **0.8619**; Blend AP: **1.0000**
+  - Transformer weight: **0.15** (saved for testing; GBDT dominates on benchmark)
   - The model file is git-ignored (weights stay local; only code is published)
-- **Live window scores (epoch day_2026-06-27)**:
-  R1=0.287 (old model, broken) → R2=0.448 → R3=0.480 → R4=0.0 (port blocked) → R5=0.429
-  Composite ~0.329 → Rank ~111. Leaders at 0.55.
-- **New epoch**: starts July 2 00:00 UTC (5-day epoch, 5 rounds of ~24h each).
-  First full epoch with new 145-feat ensemble + port confirmed open. Expect 0.47–0.52.
+- **Live state (epoch day_2026-07-02_1200utc)**:
+  Rank ≈ 39, composite ≈ 0.487
+- **Competition leaders**: rank-1 phasberg/poker44-model-v5 (0.632), rank-2 phasberg/poker44-model-v11 (0.610)
 - **Manifest**: `transparent`, `manifestReviewFailed=False` (originality OK).
 - **Automation**: cron runs `auto_retrain.sh` nightly (01:00 UTC) and `monitor_round.sh`
   every 2h (logs to `logs/round_metrics.csv`).
@@ -50,12 +54,13 @@ validator/scoring/core — see §8.
 
 | File | Purpose |
 |------|---------|
-| `poker44/miner_model/features.py` | 145-feature extractor. Deterministic chunk→vector. Same path for train and live (zero skew). All features are **scale-invariant** (no absolute BB magnitudes). |
-| `poker44/miner_model/ensemble.py` | `EnsembleClassifier` + `BlendedIsotonicCalibrator`. Lives in the package so joblib can unpickle from any working directory. |
+| `poker44/miner_model/features.py` | 289-feature extractor. Deterministic chunk→vector. Same path for train and live (zero skew). All features are **scale-invariant** (no absolute BB magnitudes). |
+| `poker44/miner_model/ensemble.py` | `OOFStackedEnsemble` (7-model OOF stacker) + `BlendedIsotonicCalibrator`. Lives in the package so joblib can unpickle from any working directory. |
+| `poker44/miner_model/transformer.py` | `TransformerScorer`: 2-layer hand encoder + 1-layer chunk encoder, d_model=64. Blended with GBDT for final score. |
 | `poker44/miner_model/scoring_head.py` | Monotonic score shaper: positions the 0.5 cutoff at `t_star`. Under rank-first scoring this is mostly inert but harmless. |
 | `neurons/miner_trained.py` | The miner. Loads model, scores chunks, builds manifest (`POKER44_MODEL_REPO_COMMIT` env, NOT git). Falls back to heuristic if no model. |
 | `scripts/miner/train/build_dataset.py` | Pulls labeled chunks from public benchmark API → `.npz` via `extract_chunk_features`. |
-| `scripts/miner/train/train_model.py` | Trains 5-way ensemble + BlendedIsotonicCalibrator. `train_ensemble(X_train, y_train [, X_val, y_val])` — val args optional (internal 80/20 split if omitted). |
+| `scripts/miner/train/train_model.py` | Trains OOF stacked ensemble + optional transformer blend. |
 | `scripts/miner/train/auto_retrain.py` | Nightly: rebuild data, train candidate, promote only if it beats incumbent on UNSEEN recent dates + margin. |
 | `scripts/miner/train/auto_retrain.sh` | Cron wrapper (01:00 UTC). Acquires lock, runs auto_retrain.py. |
 | `scripts/miner/monitor_round.py/.sh` | Appends rank/score to `logs/round_metrics.csv` every 2h. |
@@ -80,8 +85,8 @@ Reward formula lives in `poker44/score/scoring.py`. **Upstream changed it on 202
 
 Scored over a rolling 20-sample window in `poker44/validator/forward.py`.
 
-**Competition epochs**: 120h (5 days), 5 rounds of ~24h each. `winner_take_all` settlement.
-Epoch anchor: June 27 00:00 UTC → next epoch starts July 2 00:00 UTC.
+**Competition epochs**: 120h (5 days), 5 rounds of ~24h each. `WINNER_TAKE_ALL=True` settlement.
+Epoch anchor: July 2 00:00 UTC (current epoch day_2026-07-02_1200utc).
 
 **Implication**: the dominant lever is **ranking quality on LIVE data** (AP on bots vs humans).
 Threshold games are spent. Focus on feature quality and model AP.
@@ -91,19 +96,20 @@ Threshold games are spent. Focus on feature quality and model AP.
 ## 5. Key design decisions & rationale
 
 - **Scale-invariant features**: live data is distribution-shifted vs benchmark — absolute
-  BB magnitude features saturate the model (~0.86–0.91 for everything). We use fractions,
-  CVs, entropies, and bucket-based features ONLY. Score spread improved 0.07–0.73 on live
-  data. **Single most impactful change.**
-- **145 features** (19 per-hand × 7 stats + 8 chunk signatures + 4 global rates): captures
-  per-hand behavioral variation that 26 aggregate features miss.
-- **5-way ensemble** (lgbm1, lgbm2, lgbm3, ExtraTrees, RandomForest): diverse models
-  reduce variance. AP improved 0.775 → 0.816.
+  BB magnitude features saturate the model. We use fractions, CVs, entropies, and
+  bucket-based features ONLY. Score spread improved 0.07–0.73 on live data.
+  **Single most impactful change.**
+- **289 features** (19 per-hand × 7 stats + 10 schema per-hand × 7 + 8 extra per-hand × 7 + 8 chunk-sig + 4 global + 6 temporal + 12 collision): captures per-hand behavioral
+  variation across multiple feature families.
+- **7-model OOF stacked ensemble** (lgbm1, lgbm2, lgbm3 seeds 42/17/99, ExtraTrees, RandomForest, XGBoost, CatBoost): diverse models reduce variance. OOF stacking avoids target leakage.
+- **TransformerScorer blend** (w=0.15): 2-layer Transformer over action tokens per hand, 1-layer over hand embeddings. Captures action ORDER, not just aggregates. Holdout AP 0.8619.
 - **BlendedIsotonicCalibrator** (blend=0.5): de-saturates scores while preserving ranking
-  monotonicity. Calibrator fitted on val split; model stores it inside EnsembleClassifier.
+  monotonicity. Calibrator fitted on val split; model stores it inside OOFStackedEnsemble.
 - **Auto-retrain only promotes on UNSEEN-data improvement + margin**: prevents nightly
   retrain from regressing live model. Worst case = "no change".
 - **Weights private, code public**: `.joblib` is git-ignored. Only `features.py`,
-  `ensemble.py`, `scoring_head.py`, `miner_trained.py` are published (manifest covers them).
+  `ensemble.py`, `transformer.py`, `scoring_head.py`, `miner_trained.py` are published
+  (manifest covers them).
 
 ---
 
@@ -112,9 +118,9 @@ Threshold games are spent. Focus on feature quality and model AP.
 1. **bittensor version**: repo's unpinned `requirements.txt` pulls bittensor 10.x →
    `config.neuron is None` → miner crash-loops. Pin: `bittensor==9.12.2` +
    `async-substrate-interface==1.6.4`. See `requirements-migrate.txt`.
-2. **NEVER change `features.py` without retraining + republishing together.** A 145-feat
-   `features.py` with a 26-feat model crashes scoring. Always use `deploy_robust.sh` for
-   code changes (atomic: commit+push+update env+restart).
+2. **NEVER change `features.py` without retraining + republishing together.** A 289-feat
+   `features.py` with a model trained on fewer features crashes scoring. Always use
+   `deploy_robust.sh` for code changes (atomic: commit+push+update env+restart).
 3. **Eligibility**: must enter epoch from ~R1; late entry = `competition_late_entry_ineligible`
    (score 0 that epoch). Keep miner up. Port 8092 must be open in BOTH OS UFW AND cloud
    provider firewall.
@@ -130,26 +136,23 @@ Threshold games are spent. Focus on feature quality and model AP.
    retrain with clean date splits fixes this when needed.
 8. **git is NOT needed to run** (manifest reads env var). Only needed for `deploy_robust.sh`
    and `sync_upstream.sh`.
+9. **xgboost + catboost must be installed in .venv**: `pip install xgboost catboost` inside
+   `.venv`. Missing packages cause silent OOF errors at training time.
 
 ---
 
 ## 7. What to do next (open work, highest-leverage first)
 
-1. **Phase 2 — ChunkSetTransformer sequence model** (target rank 1–3, composite ~0.54+):
-   2-layer Transformer over action tokens per hand, 1-layer Transformer over hand embeddings,
-   d_model=64, n_heads=4. Requires PyTorch. Architecture captures action ORDER, not just
-   aggregates. Estimated +0.04–0.08 AP over ensemble baseline.
-   - Build: `poker44/miner_model/transformer.py`
-   - Train: extend `scripts/miner/train/train_model.py` to optionally use Transformer features
-   - Must still be importable from the `poker44` package for joblib to unpickle.
+1. **Improve live ranking quality**: benchmark AP=1.0000 but live may differ. Monitor score
+   spread (`score[min/max]=A/B`) — width > 0.3 is healthy. If saturated, check for
+   scale-sensitive features or distribution shift.
 
-2. **More training data freshness**: `auto_retrain.sh` pulls all dates nightly (DISCOVER_LIMIT=60).
-   Weight recent dates higher (closer to live distribution). Currently using 37 dates
-   (May 26 – July 1); older dates may have different bot mix than live.
+2. **Increase transformer contribution**: holdout AP=0.8619 vs GBDT 1.0000. The GBDT
+   dominates on benchmark, but the transformer may generalize better on live data.
+   Experiment with higher transformer weight or longer training (more epochs, more data).
 
-3. **Live score monitoring**: after any model change, check live score SPREAD in pm2 logs:
-   `Scored N chunks | flagged=X | score[min/max]=A/B`. Width `B-A` > 0.3 is healthy.
-   Under 0.2 suggests saturation; check for scale-sensitive features.
+3. **More training data freshness**: `auto_retrain.sh` pulls all dates nightly (DISCOVER_LIMIT=60).
+   Weight recent dates higher (closer to live distribution).
 
 4. **Watch leader repos**: top miners publish their code. Pull and study at their leaderboard
    `repoCommit` to understand feature/architecture advances.
@@ -203,7 +206,7 @@ source .secrets
 bash scripts/miner/sync_upstream.sh
 ```
 This script: fetches upstream, shows diffs in scoring.py/forward.py, merges upstream/main,
-RESTORES our custom files (features.py, ensemble.py, miner_trained.py, all scripts/miner/),
+RESTORES our custom files (features.py, ensemble.py, transformer.py, miner_trained.py, all scripts/miner/),
 pushes merged result to SerGem811/poker44-model, restarts pm2.
 
 After sync: **re-read scoring.py for reward formula changes**. If the formula changed
@@ -236,6 +239,7 @@ git fetch -q origin main && git reset --mixed FETCH_HEAD
 
 Common issues:
 - `config.neuron is None` → wrong bittensor version (pin 9.12.2 + asi 1.6.4)
-- model/feature mismatch → both must have same feature count (currently 145)
+- model/feature mismatch → both must have same feature count (currently 289)
 - no `Scored` lines → port 8092 blocked (check both ufw AND cloud provider)
 - `Manifest status=missing_files` → miner can't reach GitHub to verify repo
+- xgboost/catboost import errors → install in .venv: `pip install xgboost catboost`
