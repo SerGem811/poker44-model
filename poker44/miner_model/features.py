@@ -12,7 +12,7 @@ So the only learnable signal is *behavioural regularity*. Bots tend to:
   * keep aggression/continuation patterns unusually consistent,
   * deviate from the human distribution of action-type mixes and street depth.
 
-Feature design (301 total):
+Feature design (307 total):
   - 19 per-hand feature values × 7 statistics = 133 stat features
   - 10 schema per-hand features × 7 statistics = 70 stat features
   - 8 extra per-hand features × 7 statistics = 56 stat features (blind share,
@@ -22,6 +22,7 @@ Feature design (301 total):
   - 12 temporal consistency features (lag-1/2 autocorr, half-delta, trend slope)
   - 12 chunk-level sequence-collision features (novel)
   - 6 pot-fraction and action-pattern features (bet/pot ratio CV, clustering, bigrams)
+  - 6 intra-session consistency features (quartile std + Q4-Q1 drift)
 
 The extra per-hand features use BB-normalized values (amount_bb, stacks/bb)
 since the validator consistently normalizes these across all stake levels.
@@ -300,6 +301,18 @@ FEATURE_NAMES += [
     "lag1_autocorr_hero_bet_pot", # lag-1 autocorr of per-hand avg hero bet/pot ratio
     "hero_fold_to_bet_rate",      # hero folds / (hero faces bet or raise)
     "action_bigram_entropy",      # entropy of consecutive action-type bigrams across all hands
+]
+
+# 6 intra-session consistency features (novel)
+# Divide session into 4 quarters; compute how stable fold/aggression/size_cv are over the session.
+# Bots maintain a fixed strategy throughout; humans adapt.
+FEATURE_NAMES += [
+    "fold_quartile_std",         # std of per-quartile mean fold rate (bots ≈ 0)
+    "aggro_quartile_std",        # std of per-quartile mean aggression fraction
+    "size_cv_quartile_std",      # std of per-quartile mean size CV
+    "fold_q4_minus_q1",          # Q4 fold rate minus Q1 fold rate (session drift)
+    "aggro_q4_minus_q1",         # Q4 aggression fraction minus Q1 (session drift)
+    "size_cv_q4_minus_q1",       # Q4 size CV minus Q1 (session drift)
 ]
 
 
@@ -675,7 +688,7 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 301-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 307-float vector.
 
     Feature layout:
       [0:133]   per-hand statistics: 19 features × 7 stats
@@ -686,6 +699,7 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
       [271:283] temporal consistency features (12: lag1/2 autocorr, half-delta, trend slope)
       [283:295] sequence-collision features (12, novel)
       [295:301] pot-fraction + action-pattern features (6, novel)
+      [301:307] intra-session consistency features (6, novel)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -1049,9 +1063,47 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         action_bigram_entropy,
     ]
 
+    # --- Intra-session consistency features (6) ---
+    # Divide session into 4 equal quarters; compute mean fold/aggression/size_cv per quarter.
+    # Bots maintain constant strategy (low std); humans adapt (higher std, larger drift).
+    q_size = max(1, n_hands // 4)
+    quarters: List[List[List[float]]] = [per_hand[i * q_size: (i + 1) * q_size] for i in range(4)]
+    # Use last quarter to soak up any remainder
+    remainder = per_hand[4 * q_size:]
+    if remainder and quarters:
+        quarters[-1] = quarters[-1] + remainder
+
+    def _q_mean(q: List[List[float]], fi: int) -> float:
+        if not q:
+            return 0.0
+        return sum(h[fi] for h in q) / len(q)
+
+    fold_fi = 0     # frac_fold index in per-hand
+    aggro_fi = 3    # frac_bet index (proxy for aggression)
+    size_cv_fi = 7  # size_cv index
+
+    q_fold = [_q_mean(q, fold_fi) for q in quarters]
+    q_aggro = [_q_mean(q, aggro_fi) for q in quarters]
+    q_size_cv = [_q_mean(q, size_cv_fi) for q in quarters]
+
+    def _seq_std(vals: List[float]) -> float:
+        if len(vals) < 2:
+            return 0.0
+        m = sum(vals) / len(vals)
+        return math.sqrt(sum((v - m) ** 2 for v in vals) / len(vals))
+
+    intra_features = [
+        _seq_std(q_fold),
+        _seq_std(q_aggro),
+        _seq_std(q_size_cv),
+        q_fold[-1] - q_fold[0],
+        q_aggro[-1] - q_aggro[0],
+        q_size_cv[-1] - q_size_cv[0],
+    ]
+
     # --- Assemble final vector ---
     vec = (stat_features + chunk_sig_features + global_rate_features
-           + temporal_features + collision_features + pot_frac_features)
+           + temporal_features + collision_features + pot_frac_features + intra_features)
 
     # Guard against any non-finite leakage so downstream models stay stable.
     return [float(v) if math.isfinite(v) else 0.0 for v in vec]
