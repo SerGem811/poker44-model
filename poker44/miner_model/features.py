@@ -315,6 +315,15 @@ FEATURE_NAMES += [
     "size_cv_q4_minus_q1",       # Q4 size CV minus Q1 (session drift)
 ]
 
+# 4 street action share features (audit top-2 discriminators)
+# flop_action_share (inverse, AP=0.662) and river_action_share (direct, AP=0.622)
+FEATURE_NAMES += [
+    "chunk_flop_action_share",   # flop actions / total actions across chunk
+    "chunk_river_action_share",  # river actions / total actions across chunk
+    "hero_flop_action_share",    # hero flop actions / hero total actions
+    "hero_river_action_share",   # hero river actions / hero total actions
+]
+
 
 def _compute_schema_per_hand_features(hand: Dict[str, Any]) -> List[float]:
     """Compute 10 additional schema per-hand features (indices 19-28)."""
@@ -744,9 +753,13 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
     all_action_type_set: set = set()
     chunk_action_counts: Counter = Counter()
     chunk_actor_counts: Counter = Counter()
+    chunk_street_action_counts: Counter = Counter()
     chunk_sizes_all: List[float] = []
     chunk_sizes_bucket_indices: List[int] = []
     hands_with_hero_action: int = 0
+    hero_flop_actions: int = 0
+    hero_river_actions: int = 0
+    hero_total_actions: int = 0
 
     for h in hands:
         actions = h.get("actions") or []
@@ -769,6 +782,15 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
             except (TypeError, ValueError):
                 seat = 0
             chunk_actor_counts[seat] += 1
+            st_name = str(a.get("street", "") or "").lower()
+            chunk_street_action_counts[st_name] += 1
+            is_hero_act = (seat != 0 and seat == hero_seat)
+            if is_hero_act:
+                hero_total_actions += 1
+                if st_name == "flop":
+                    hero_flop_actions += 1
+                elif st_name == "river":
+                    hero_river_actions += 1
             if seat != 0 and seat == hero_seat:
                 hand_has_hero = True
             amt = float(a.get("normalized_amount_bb", 0.0) or 0.0)
@@ -867,6 +889,22 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         global_action_entropy,
         global_actor_entropy,
         long_hand_rate,
+    ]
+
+    # --- Street action share features (4) ---
+    # flop/river share of total chunk actions.  Bots fold preflop more (lower flop share)
+    # but commit to the river when they stay in (higher river share).
+    _total_st = max(1, sum(chunk_street_action_counts.values()))
+    chunk_flop_action_share  = chunk_street_action_counts.get("flop", 0)  / _total_st
+    chunk_river_action_share = chunk_street_action_counts.get("river", 0) / _total_st
+    hero_flop_action_share   = hero_flop_actions  / max(1, hero_total_actions)
+    hero_river_action_share  = hero_river_actions / max(1, hero_total_actions)
+
+    street_features = [
+        chunk_flop_action_share,
+        chunk_river_action_share,
+        hero_flop_action_share,
+        hero_river_action_share,
     ]
 
     # --- Temporal consistency features (6) ---
@@ -1103,7 +1141,8 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
 
     # --- Assemble final vector ---
     vec = (stat_features + chunk_sig_features + global_rate_features
-           + temporal_features + collision_features + pot_frac_features + intra_features)
+           + street_features + temporal_features + collision_features
+           + pot_frac_features + intra_features)
 
     # Guard against any non-finite leakage so downstream models stay stable.
     return [float(v) if math.isfinite(v) else 0.0 for v in vec]
