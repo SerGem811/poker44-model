@@ -25,6 +25,7 @@ Run exactly like the reference miner, e.g.:
 
 import math
 import os
+import subprocess
 import time
 from pathlib import Path
 import warnings
@@ -114,6 +115,15 @@ class TrainedModel:
         return [float(v) for v in gbdt_p]
 
 
+def _git_head_commit(repo_root: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=str(repo_root), stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        return ""
+
+
 def _heuristic_proba(feats: List[float]) -> float:
     """Feature-driven fallback: emphasise sizing regularity + aggression tells."""
     f = dict(zip(FEATURE_NAMES, feats))
@@ -154,7 +164,7 @@ class TrainedMiner(BaseMinerNeuron):
                 "framework": "lightgbm+sklearn-ensemble" if self.model else "python-heuristic",
                 "license": "MIT",
                 "repo_url": "https://github.com/SerGem811/poker44-model",
-                "repo_commit": "84d9008883ccc03bc1bccfe548c9496557cf7806",
+                "repo_commit": _git_head_commit(repo_root),
                 "open_source": True,
                 "inference_mode": "remote",
                 "notes": (
