@@ -12,7 +12,7 @@ So the only learnable signal is *behavioural regularity*. Bots tend to:
   * keep aggression/continuation patterns unusually consistent,
   * deviate from the human distribution of action-type mixes and street depth.
 
-Feature design (295 total):
+Feature design (301 total):
   - 19 per-hand feature values × 7 statistics = 133 stat features
   - 10 schema per-hand features × 7 statistics = 70 stat features
   - 8 extra per-hand features × 7 statistics = 56 stat features (blind share,
@@ -21,6 +21,7 @@ Feature design (295 total):
   - 4 global behavior rate features
   - 12 temporal consistency features (lag-1/2 autocorr, half-delta, trend slope)
   - 12 chunk-level sequence-collision features (novel)
+  - 6 pot-fraction and action-pattern features (bet/pot ratio CV, clustering, bigrams)
 
 The extra per-hand features use BB-normalized values (amount_bb, stacks/bb)
 since the validator consistently normalizes these across all stake levels.
@@ -287,6 +288,18 @@ FEATURE_NAMES += [
     "seq_low_action_entropy_hand_rate",# fraction of hands with action_entropy <= 0.35
     "seq_high_actor_entropy_hand_rate",# fraction of hands with actor_entropy >= 0.75
     "seq_long_action_hand_rate",       # fraction of hands with >= 12 actions
+]
+
+# 6 pot-fraction and action-pattern features (novel)
+# Bots bet a fixed fraction of pot; humans vary. Action bigrams expose stereotyped play.
+_STD_POT_FRACS = (0.25, 0.33, 0.50, 0.67, 0.75, 1.00, 1.50, 2.00)
+FEATURE_NAMES += [
+    "bet_pot_ratio_cv",           # CV of all bet/raise (amount/pot_before) across chunk
+    "bet_pot_ratio_cluster_frac", # fraction of bets within ±0.08 of a standard pot fraction
+    "hero_bet_pot_ratio_cv",      # CV of hero-only bet/raise pot fractions
+    "lag1_autocorr_hero_bet_pot", # lag-1 autocorr of per-hand avg hero bet/pot ratio
+    "hero_fold_to_bet_rate",      # hero folds / (hero faces bet or raise)
+    "action_bigram_entropy",      # entropy of consecutive action-type bigrams across all hands
 ]
 
 
@@ -662,7 +675,7 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 295-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 301-float vector.
 
     Feature layout:
       [0:133]   per-hand statistics: 19 features × 7 stats
@@ -672,6 +685,7 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
       [267:271] global behavior rate features (4)
       [271:283] temporal consistency features (12: lag1/2 autocorr, half-delta, trend slope)
       [283:295] sequence-collision features (12, novel)
+      [295:301] pot-fraction + action-pattern features (6, novel)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -933,8 +947,111 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         long_action_count / n_hands_f,
     ]
 
+    # --- Pot-fraction and action-pattern features (6) ---
+    # bet_pot_ratio_cv: CV of (amount / pot_before) for all bet/raise actions.
+    # Bots tend to use a fixed pot fraction; humans vary → bots have lower CV.
+    all_pot_ratios: List[float] = []
+    hero_pot_ratios_per_hand: List[float] = []  # per-hand avg hero bet/pot ratio
+    hero_faces_aggr_count: int = 0    # times hero faces a bet/raise
+    hero_fold_facing_aggr: int = 0    # times hero folds when facing a bet/raise
+    bigram_ctr: Counter = Counter()
+
+    for h in hands:
+        actions = h.get("actions") or []
+        meta = h.get("metadata") or {}
+        try:
+            hero_seat = int(meta.get("hero_seat", 0) or 0)
+        except (TypeError, ValueError):
+            hero_seat = 0
+
+        hand_hero_pot_ratios: List[float] = []
+        prev_at: str = ""
+        last_non_hero_aggro_street: str = ""
+        for a in actions:
+            if not isinstance(a, dict):
+                continue
+            at = str(a.get("action_type", "") or "").lower()
+            if at not in _ACTION_TYPES:
+                continue
+            try:
+                seat = int(a.get("actor_seat", 0) or 0)
+            except (TypeError, ValueError):
+                seat = 0
+            amt = float(a.get("amount", 0.0) or 0.0)
+            pot_b = float(a.get("pot_before", 0.0) or 0.0)
+            is_hero = seat != 0 and seat == hero_seat
+
+            # All players bet/pot ratio
+            if at in _AGGRO and pot_b > 0.01 and amt > 0:
+                ratio = amt / pot_b
+                all_pot_ratios.append(ratio)
+                if is_hero:
+                    hand_hero_pot_ratios.append(ratio)
+
+            # Track hero facing opponent aggression
+            if not is_hero and at in _AGGRO:
+                last_non_hero_aggro_street = str(a.get("street", "") or "")
+            if is_hero and at == "fold" and last_non_hero_aggro_street:
+                hero_fold_facing_aggr += 1
+                last_non_hero_aggro_street = ""
+                hero_faces_aggr_count += 1
+            elif is_hero and at in _PASSIVE and last_non_hero_aggro_street:
+                hero_faces_aggr_count += 1
+                last_non_hero_aggro_street = ""
+            elif is_hero and at in _AGGRO:
+                last_non_hero_aggro_street = ""
+
+            # Action bigrams (any player, same hand)
+            if prev_at and at:
+                bigram_ctr[(prev_at, at)] += 1
+            prev_at = at
+
+        hero_pot_ratios_per_hand.append(
+            sum(hand_hero_pot_ratios) / len(hand_hero_pot_ratios) if hand_hero_pot_ratios else 0.0
+        )
+
+    def _cv(vals: List[float]) -> float:
+        if len(vals) < 2:
+            return 0.0
+        m = sum(vals) / len(vals)
+        if abs(m) < 1e-9:
+            return 0.0
+        s = math.sqrt(sum((v - m) ** 2 for v in vals) / len(vals))
+        return s / abs(m)
+
+    bet_pot_ratio_cv = _cv(all_pot_ratios)
+    hero_bet_pot_ratio_cv = _cv([r for r in hero_pot_ratios_per_hand if r > 0])
+
+    # Fraction of bets within ±0.08 of a standard pot fraction
+    if all_pot_ratios:
+        n_clustered = sum(
+            1 for r in all_pot_ratios
+            if any(abs(r - s) <= 0.08 for s in _STD_POT_FRACS)
+        )
+        bet_pot_ratio_cluster_frac = n_clustered / len(all_pot_ratios)
+    else:
+        bet_pot_ratio_cluster_frac = 0.0
+
+    lag1_autocorr_hero_bet_pot = _lag1_autocorr(hero_pot_ratios_per_hand)
+
+    hero_fold_to_bet_rate = (
+        hero_fold_facing_aggr / hero_faces_aggr_count if hero_faces_aggr_count > 0 else 0.0
+    )
+
+    action_bigram_entropy = _entropy(list(bigram_ctr.values()))
+
+    pot_frac_features = [
+        bet_pot_ratio_cv,
+        bet_pot_ratio_cluster_frac,
+        hero_bet_pot_ratio_cv,
+        lag1_autocorr_hero_bet_pot,
+        hero_fold_to_bet_rate,
+        action_bigram_entropy,
+    ]
+
     # --- Assemble final vector ---
-    vec = stat_features + chunk_sig_features + global_rate_features + temporal_features + collision_features
+    vec = (stat_features + chunk_sig_features + global_rate_features
+           + temporal_features + collision_features + pot_frac_features)
 
     # Guard against any non-finite leakage so downstream models stay stable.
     return [float(v) if math.isfinite(v) else 0.0 for v in vec]
