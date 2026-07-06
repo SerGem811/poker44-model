@@ -150,22 +150,34 @@ class TrainedMiner(BaseMinerNeuron):
             ],
             defaults={
                 "model_name": "poker44-gbdt-behavioural",
-                "model_version": "2",
-                "framework": "lightgbm" if self.model else "python-heuristic",
+                "model_version": "7-way-within-batch-311",
+                "framework": "lightgbm+sklearn-ensemble" if self.model else "python-heuristic",
                 "license": "MIT",
-                "repo_url": "https://github.com/Poker44/Poker44-subnet",
+                "repo_url": "https://github.com/SerGem811/poker44-model",
+                "repo_commit": "84d9008883ccc03bc1bccfe548c9496557cf7806",
                 "open_source": True,
                 "inference_mode": "remote",
-                "notes": f"GBDT behavioural bot-detector ({mode}) with FPR-safe scoring head.",
+                "notes": (
+                    f"7-model OOF stacked ensemble (lgbm×3 + ExtraTrees + RandomForest + "
+                    f"XGBoost + CatBoost) with BlendedIsotonicCalibrator. 311 behavioural "
+                    f"features including street action share, pot-fraction, and intra-session "
+                    f"consistency. Within-batch normalisation; variable batch composition "
+                    f"(30–70 bots) for robustness. Mode: {mode}."
+                ),
                 "training_data_statement": (
-                    "Trained on the public Poker44 benchmark "
-                    "(api.poker44.net/api/v1/benchmark) miner-visible chunk payloads "
-                    "with chunk-level human/bot labels. No validator-only data used."
+                    "Trained exclusively on the public Poker44 benchmark API "
+                    "(api.poker44.net/api/v1/benchmark) using miner-visible chunk payloads "
+                    "with chunk-level human/bot labels. 724 sessions (362 bot, 362 human) "
+                    "from benchmark releases Jun 19 – Jul 6 2026, augmented to 1448 sessions "
+                    "via session concatenation, then formed into 250 synthetic within-batch "
+                    "normalised training batches of 100 sessions each with variable bot:human "
+                    "ratio (30–70%). No validator-only or private data used."
                 ),
                 "training_data_sources": ["poker44-public-benchmark"],
                 "private_data_attestation": (
-                    "This miner does not train on validator-only evaluation data; "
-                    "only the public benchmark is used."
+                    "This miner does not train on validator-only evaluation data. "
+                    "Only the public benchmark API (miner-visible chunk payloads) is used. "
+                    "No live evaluation data is used for training or fine-tuning."
                 ),
                 "data_attestation": "public-benchmark-only",
             },
