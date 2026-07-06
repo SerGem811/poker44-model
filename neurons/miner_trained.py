@@ -51,12 +51,14 @@ class TrainedModel:
     """Wrapper around GBDT ensemble + optional Transformer scorer."""
 
     def __init__(self, estimator, head: ScoringHead, feature_names: List[str],
-                 transformer=None, transformer_weight: float = 0.5):
+                 transformer=None, transformer_weight: float = 0.5,
+                 within_batch_norm: bool = False):
         self.estimator = estimator
         self.head = head
         self.feature_names = feature_names
-        self.transformer = transformer          # TransformerScorer or None
+        self.transformer = transformer
         self.transformer_weight = transformer_weight
+        self.within_batch_norm = within_batch_norm  # normalize batch against itself before scoring
 
     @classmethod
     def load(cls, path: str) -> Optional["TrainedModel"]:
@@ -73,6 +75,7 @@ class TrainedModel:
                 feature_names=blob.get("feature_names", FEATURE_NAMES),
                 transformer=blob.get("transformer"),
                 transformer_weight=float(blob.get("transformer_weight", 0.5)),
+                within_batch_norm=bool(blob.get("within_batch_norm", False)),
             )
         except Exception as exc:  # pragma: no cover - defensive load
             bt.logging.warning(f"Failed to load model from {path}: {exc}")
@@ -82,6 +85,16 @@ class TrainedModel:
         import numpy as np
 
         x = np.asarray(feats, dtype=float)
+
+        # Within-batch normalization: remove format-level bias by normalizing each
+        # session's features relative to the batch's own mean/std. Trained and inferred
+        # the same way so the model's thresholds live in normalized space.
+        if self.within_batch_norm and len(x) >= 10:
+            mean = x.mean(axis=0)
+            std = x.std(axis=0)
+            std = np.where(std < 1e-8, 1.0, std)
+            x = np.clip((x - mean) / std, -5.0, 5.0)
+
         if hasattr(self.estimator, "predict_proba"):
             gbdt_p = self.estimator.predict_proba(x)[:, 1]
         else:
@@ -125,7 +138,8 @@ class TrainedMiner(BaseMinerNeuron):
         self.model = TrainedModel.load(_DEFAULT_MODEL_PATH)
         self.fallback_head = ScoringHead(t_star=0.62, sharpness=12.0)
         mode = "trained-gbdt" if self.model else "heuristic-fallback"
-        bt.logging.info(f"🧠 Poker44 TrainedMiner started (mode={mode})")
+        norm_mode = "within-batch" if (self.model and self.model.within_batch_norm) else "raw"
+        bt.logging.info(f"🧠 Poker44 TrainedMiner started (mode={mode}, norm={norm_mode})")
 
         self.model_manifest = build_local_model_manifest(
             repo_root=repo_root,
