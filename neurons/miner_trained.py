@@ -160,7 +160,7 @@ class TrainedMiner(BaseMinerNeuron):
             ],
             defaults={
                 "model_name": "poker44-gbdt-behavioural",
-                "model_version": "7-way-within-batch-311",
+                "model_version": "7-way-within-batch-317",
                 "framework": "lightgbm+sklearn-ensemble" if self.model else "python-heuristic",
                 "license": "MIT",
                 "repo_url": "https://github.com/SerGem811/poker44-model",
