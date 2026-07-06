@@ -186,6 +186,10 @@ def _lag2_autocorr(values: Sequence[float]) -> float:
     return _lagk_autocorr(values, 2)
 
 
+def _lag3_autocorr(values: Sequence[float]) -> float:
+    return _lagk_autocorr(values, 3)
+
+
 def _trend_slope(values: Sequence[float]) -> float:
     """Normalized linear regression slope over the session. Bots show near-zero drift."""
     n = len(values)
@@ -272,6 +276,9 @@ FEATURE_NAMES += [
     "trend_slope_aggression",     # normalised linear slope of aggro fraction over session
     "trend_slope_fold",           # normalised linear slope of fold fraction over session
     "trend_slope_size_cv",        # normalised linear slope of size CV over session
+    "lag3_autocorr_aggression",   # lag-3 autocorr of per-hand aggro fraction
+    "lag3_autocorr_fold",         # lag-3 autocorr of per-hand fold fraction
+    "lag3_autocorr_size_cv",      # lag-3 autocorr of per-hand size CV
 ]
 
 # 12 chunk-level sequence-collision features
@@ -322,6 +329,9 @@ FEATURE_NAMES += [
     "chunk_river_action_share",  # river actions / total actions across chunk
     "hero_flop_action_share",    # hero flop actions / hero total actions
     "hero_river_action_share",   # hero river actions / hero total actions
+    "flop_aggro_share",          # flop bet+raise / all bet+raise across chunk (bots fold preflop → less flop aggression)
+    "turn_aggro_share",          # turn bet+raise / all bet+raise across chunk
+    "river_aggro_share",         # river bet+raise / all bet+raise across chunk (bots commit on river → more river aggression)
 ]
 
 
@@ -754,6 +764,7 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
     chunk_action_counts: Counter = Counter()
     chunk_actor_counts: Counter = Counter()
     chunk_street_action_counts: Counter = Counter()
+    chunk_street_aggro_counts: Counter = Counter()
     chunk_sizes_all: List[float] = []
     chunk_sizes_bucket_indices: List[int] = []
     hands_with_hero_action: int = 0
@@ -784,6 +795,8 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
             chunk_actor_counts[seat] += 1
             st_name = str(a.get("street", "") or "").lower()
             chunk_street_action_counts[st_name] += 1
+            if at in _AGGRO:
+                chunk_street_aggro_counts[st_name] += 1
             is_hero_act = (seat != 0 and seat == hero_seat)
             if is_hero_act:
                 hero_total_actions += 1
@@ -900,11 +913,19 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
     hero_flop_action_share   = hero_flop_actions  / max(1, hero_total_actions)
     hero_river_action_share  = hero_river_actions / max(1, hero_total_actions)
 
+    _total_aggro_st = max(1, sum(chunk_street_aggro_counts.values()))
+    flop_aggro_share  = chunk_street_aggro_counts.get("flop",  0) / _total_aggro_st
+    turn_aggro_share  = chunk_street_aggro_counts.get("turn",  0) / _total_aggro_st
+    river_aggro_share = chunk_street_aggro_counts.get("river", 0) / _total_aggro_st
+
     street_features = [
         chunk_flop_action_share,
         chunk_river_action_share,
         hero_flop_action_share,
         hero_river_action_share,
+        flop_aggro_share,
+        turn_aggro_share,
+        river_aggro_share,
     ]
 
     # --- Temporal consistency features (6) ---
@@ -926,6 +947,9 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         _trend_slope(aggro_frac_ph),
         _trend_slope(fold_frac_ph),
         _trend_slope(size_cv_ph),
+        _lag3_autocorr(aggro_frac_ph),
+        _lag3_autocorr(fold_frac_ph),
+        _lag3_autocorr(size_cv_ph),
     ]
 
     # --- Sequence-collision features (12) ---
