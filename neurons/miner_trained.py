@@ -160,7 +160,7 @@ class TrainedMiner(BaseMinerNeuron):
             ],
             defaults={
                 "model_name": "poker44-gbdt-behavioural",
-                "model_version": "7-way-within-batch-317",
+                "model_version": "7-way-within-batch-317-v2",
                 "framework": "lightgbm+sklearn-ensemble" if self.model else "python-heuristic",
                 "license": "MIT",
                 "repo_url": "https://github.com/SerGem811/poker44-model",
@@ -177,11 +177,12 @@ class TrainedMiner(BaseMinerNeuron):
                 "training_data_statement": (
                     "Trained exclusively on the public Poker44 benchmark API "
                     "(api.poker44.net/api/v1/benchmark) using miner-visible chunk payloads "
-                    "with chunk-level human/bot labels. 724 sessions (362 bot, 362 human) "
-                    "from benchmark releases Jun 19 – Jul 6 2026, augmented to 1448 sessions "
-                    "via session concatenation, then formed into 250 synthetic within-batch "
-                    "normalised training batches of 100 sessions each with variable bot:human "
-                    "ratio (30–70%). No validator-only or private data used."
+                    "with chunk-level human/bot labels. 1186 sessions (593 bot, 593 human) "
+                    "from benchmark releases May 26 – Jul 9 2026. 317 behavioural features. "
+                    "7-model OOF stacked ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
+                    "BlendedIsotonicCalibrator. Scoring head t_star=0.80 optimised on holdout "
+                    "under the Jul 8 2026 reward formula (AP×0.35 + recall@FPR5%×0.30 + "
+                    "threshold_sanity×0.30). Within-batch normalisation. No private data."
                 ),
                 "training_data_sources": ["poker44-public-benchmark"],
                 "private_data_attestation": (
