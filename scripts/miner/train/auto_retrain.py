@@ -48,10 +48,12 @@ MARGIN = float(os.getenv("POKER44_RETRAIN_MARGIN", "0.010"))
 DISCOVER_LIMIT = int(os.getenv("POKER44_RETRAIN_DISCOVER_LIMIT", "60"))
 PER_DATE_LIMIT = int(os.getenv("POKER44_RETRAIN_PER_DATE_LIMIT", "100"))
 PM2_NAME = os.getenv("PM2_NAME", "poker44_miner")
-# NOTE: live eval data is distribution-shifted vs the public benchmark — the
-# model saturates high on live chunks, so benchmark-optimal thresholds (~0.80)
-# over-flag live and spike FPR. Keep the grid in the live-safe conservative band.
-T_STAR_GRID = [float(x) for x in os.getenv("POKER44_RETRAIN_TSTAR_GRID", "0.88,0.90,0.92").split(",")]
+# NOTE: live validator data has lower raw probabilities than benchmark data
+# (bots score ~0.5-0.80 on live, not ~0.95+ like benchmark). t_star must be
+# low enough to flag live bots (raw_prob > t_star -> final score > 0.5).
+# The new formula (Jul 8 2026) zeros reward if true_positives=0 at threshold 0.5,
+# so t_star must not exceed the typical live bot probability ceiling (~0.75).
+T_STAR_GRID = [float(x) for x in os.getenv("POKER44_RETRAIN_TSTAR_GRID", "0.45,0.50,0.55,0.60,0.65,0.70").split(",")]
 
 
 def log(msg: str) -> None:
