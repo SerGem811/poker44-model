@@ -188,6 +188,54 @@ def train_ensemble(
 
 
 # ---------------------------------------------------------------------------
+# Within-batch normalised training data
+# ---------------------------------------------------------------------------
+
+def make_within_batch_data(
+    X: np.ndarray,
+    y: np.ndarray,
+    n_batches: int = 500,
+    batch_size: int = 100,
+    bot_frac_min: float = 0.30,
+    bot_frac_max: float = 0.70,
+    rng_seed: int = 42,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Create synthetic within-batch-normalised training matrix.
+
+    Simulates live inference exactly: each batch of sessions is normalised
+    against itself (subtract batch mean, divide by batch std, clip ±5) before
+    scoring.  Training on these normalised features means the model operates
+    in the same feature space it sees at inference time.
+    """
+    rng = np.random.default_rng(rng_seed)
+    bots_idx = np.where(y == 1)[0]
+    hum_idx  = np.where(y == 0)[0]
+
+    X_out, y_out = [], []
+    for _ in range(n_batches):
+        n_bots = int(rng.integers(
+            max(1, int(batch_size * bot_frac_min)),
+            min(batch_size - 1, int(batch_size * bot_frac_max)) + 1,
+        ))
+        n_hum = batch_size - n_bots
+        bi = rng.choice(bots_idx, size=n_bots, replace=True)
+        hi = rng.choice(hum_idx,  size=n_hum,  replace=True)
+        idx = np.concatenate([bi, hi])
+        Xb  = X[idx].copy().astype(float)
+        yb  = y[idx]
+
+        mean = Xb.mean(axis=0)
+        std  = Xb.std(axis=0)
+        std[std < 1e-8] = 1.0
+        Xb = np.clip((Xb - mean) / std, -5.0, 5.0)
+
+        X_out.append(Xb)
+        y_out.append(yb)
+
+    return np.vstack(X_out), np.concatenate(y_out)
+
+
+# ---------------------------------------------------------------------------
 # Reward simulation (unchanged from original; reused by auto_retrain.py)
 # ---------------------------------------------------------------------------
 

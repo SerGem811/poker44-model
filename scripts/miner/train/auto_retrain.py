@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.join(REPO, "scripts", "miner", "train"))
 from sklearn.metrics import average_precision_score  # noqa: E402
 
 from build_dataset import build, discover_dates  # noqa: E402
-from train_model import train_ensemble, simulate_windowed_reward  # noqa: E402
+from train_model import train_ensemble, simulate_windowed_reward, make_within_batch_data  # noqa: E402
 from poker44.miner_model.scoring_head import ScoringHead, shape_risk_score  # noqa: E402
 
 MODEL_PATH = os.path.join(REPO, "models", "poker44_gbdt.joblib")
@@ -48,12 +48,12 @@ MARGIN = float(os.getenv("POKER44_RETRAIN_MARGIN", "0.010"))
 DISCOVER_LIMIT = int(os.getenv("POKER44_RETRAIN_DISCOVER_LIMIT", "60"))
 PER_DATE_LIMIT = int(os.getenv("POKER44_RETRAIN_PER_DATE_LIMIT", "100"))
 PM2_NAME = os.getenv("PM2_NAME", "poker44_miner")
-# NOTE: live validator data has lower raw probabilities than benchmark data
-# (bots score ~0.5-0.80 on live, not ~0.95+ like benchmark). t_star must be
-# low enough to flag live bots (raw_prob > t_star -> final score > 0.5).
-# The new formula (Jul 8 2026) zeros reward if true_positives=0 at threshold 0.5,
-# so t_star must not exceed the typical live bot probability ceiling (~0.75).
-T_STAR_GRID = [float(x) for x in os.getenv("POKER44_RETRAIN_TSTAR_GRID", "0.45,0.50,0.55,0.60,0.65,0.70").split(",")]
+# Within-batch normalisation: model is trained on synthetic batches where each
+# batch is normalised against itself (matching live inference exactly).
+# t_star can now be 0.5 because with correct normalisation, bots reliably
+# score above 0.5 within their batch context.
+T_STAR_GRID = [float(x) for x in os.getenv("POKER44_RETRAIN_TSTAR_GRID", "0.40,0.45,0.50,0.55,0.60").split(",")]
+N_BATCHES = int(os.getenv("POKER44_RETRAIN_N_BATCHES", "600"))
 
 
 def log(msg: str) -> None:
@@ -62,7 +62,10 @@ def log(msg: str) -> None:
 
 
 def fit_calibrated(X, y):
-    clf = train_ensemble(X, y)
+    log(f"building {N_BATCHES} within-batch-normalised synthetic batches ...")
+    Xwb, ywb = make_within_batch_data(X, y, n_batches=N_BATCHES, batch_size=100)
+    log(f"synthetic dataset: {Xwb.shape}, bot_rate={ywb.mean():.3f}")
+    clf = train_ensemble(Xwb, ywb)
     return clf, "ensemble"
 
 
@@ -94,6 +97,12 @@ def evaluate_model(path, X_hold, y_hold):
     blob = joblib.load(path)
     est = blob["estimator"]
     head = ScoringHead.from_dict(blob.get("scoring_head", {}))
+    wbn = bool(blob.get("within_batch_norm", False))
+    if wbn:
+        Xwb, ywb = make_within_batch_data(X_hold, y_hold, n_batches=200, batch_size=100)
+        p = est.predict_proba(Xwb)[:, 1]
+        shaped = np.array([head.score(v) for v in p])
+        return simulate_windowed_reward(shaped, ywb, window=20, trials=1500)
     p = est.predict_proba(X_hold)[:, 1]
     shaped = np.array([head.score(v) for v in p])
     return simulate_windowed_reward(shaped, y_hold, window=20, trials=1500)
@@ -116,6 +125,7 @@ def promote(X_all, y_all, t_star, feature_names):
             "feature_names": feature_names,
             "trained_at": datetime.now(timezone.utc).isoformat(),
             "kind": kind,
+            "within_batch_norm": True,
         },
         MODEL_PATH,
     )
@@ -153,11 +163,12 @@ def main() -> int:
         return 1
     log(f"sizes: train={len(ytr)} holdout={len(yho)} all={len(yall)}")
 
-    # Candidate trained on older dates, evaluated on unseen recent dates.
+    # Candidate trained and evaluated on within-batch-normalised data.
     cand, kind = fit_calibrated(Xtr, ytr)
-    p_ho = cand.predict_proba(Xho)[:, 1]
-    ap = average_precision_score(yho, p_ho)
-    t_star, r_cand, _ = best_safe_operating_point(p_ho, yho)
+    Xho_wb, yho_wb = make_within_batch_data(Xho, yho, n_batches=300, batch_size=100)
+    p_ho = cand.predict_proba(Xho_wb)[:, 1]
+    ap = average_precision_score(yho_wb, p_ho)
+    t_star, r_cand, _ = best_safe_operating_point(p_ho, yho_wb)
     if t_star is None:
         log(f"KEEP: could not find operating point on holdout (AP={ap:.3f}). Not deploying.")
         return 0
