@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build a labelled training matrix from the public Poker44 benchmark.
 
-Pulls miner-visible chunk payloads + chunk-level labels from
-``https://api.poker44.net/api/v1/benchmark`` and projects every chunk through the
-*same* feature extractor the live miner uses, so there is zero train/serve skew.
+Pulls chunk payloads + chunk-level labels from
+``https://api.poker44.net/api/v1/benchmark`` and projects every hand through
+``prepare_hand_for_miner`` (the same canonicaliser the live validator applies)
+before feature extraction — eliminating train/serve skew.
 
 Output: an .npz with X (n_chunks x n_features), y (0=human, 1=bot), and the
 feature-name list.
@@ -25,6 +26,7 @@ import numpy as np
 import requests
 
 from poker44.miner_model.features import FEATURE_NAMES, extract_chunk_features
+from poker44.validator.payload_view import prepare_hand_for_miner
 
 API = "https://api.poker44.net/api/v1/benchmark"
 
@@ -101,7 +103,10 @@ def build(dates: List[str], limit: int, split: Optional[str]):
                 if label is None:
                     skipped += 1
                     continue
-                X.append(extract_chunk_features(group))
+                # Apply the same canonicaliser the live validator uses so
+                # training features match inference features exactly.
+                canonical = [prepare_hand_for_miner(h) for h in group]
+                X.append(extract_chunk_features(canonical))
                 y.append(label)
                 src.append(date)
     print(f"[=] built {len(X)} labelled chunks ({skipped} unlabelled skipped)", file=sys.stderr)
