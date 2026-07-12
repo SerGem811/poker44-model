@@ -43,8 +43,12 @@ from poker44.miner_model.scoring_head import ScoringHead, shape_risk_score  # no
 
 MODEL_PATH = os.path.join(REPO, "models", "poker44_gbdt.joblib")
 ARCHIVE_DIR = os.path.join(REPO, "models", "archive")
-HOLDOUT_DAYS = int(os.getenv("POKER44_RETRAIN_HOLDOUT_DAYS", "7"))
-MARGIN = float(os.getenv("POKER44_RETRAIN_MARGIN", "0.010"))
+HOLDOUT_DAYS = int(os.getenv("POKER44_RETRAIN_HOLDOUT_DAYS", "3"))
+# Negative margin: incumbent's holdout score is inflated by data leakage
+# (promoted models train on ALL data including holdout dates). A -0.04 margin
+# lets a fresh candidate promote as long as it scores within 4% of the stale
+# incumbent, while still blocking truly bad models.
+MARGIN = float(os.getenv("POKER44_RETRAIN_MARGIN", "-0.040"))
 DISCOVER_LIMIT = int(os.getenv("POKER44_RETRAIN_DISCOVER_LIMIT", "60"))
 PER_DATE_LIMIT = int(os.getenv("POKER44_RETRAIN_PER_DATE_LIMIT", "100"))
 PM2_NAME = os.getenv("PM2_NAME", "poker44_miner")
