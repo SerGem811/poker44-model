@@ -161,6 +161,8 @@ def main() -> int:
 
         bundle["transformer"] = scorer
         bundle["transformer_weight"] = 0.5
+        if "metrics" not in bundle:
+            bundle["metrics"] = {}
         bundle["metrics"]["ap_transformer"] = float(ap)
         bundle["metrics"]["ap_combined"] = float(ap_combined)
         bundle["metrics"]["sim_reward_combined"] = float(reward_combined)
