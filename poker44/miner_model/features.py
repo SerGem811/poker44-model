@@ -34,6 +34,7 @@ This module is pure-python + optional numpy, fully deterministic, and is the
 from __future__ import annotations
 
 import math
+import zlib
 from collections import Counter
 from typing import Any, Dict, List, Sequence
 
@@ -334,6 +335,20 @@ FEATURE_NAMES += [
     "river_aggro_share",         # river bet+raise / all bet+raise across chunk (bots commit on river → more river aggression)
 ]
 
+# 8 replay-redundancy features: bots replay near-identical hands; humans vary.
+# All hero-free / bb-bucketed / ratio-normalized → survive the sanitizer and are
+# chunk-size invariant. (Matches the redundancy family used by top miners.)
+FEATURE_NAMES += [
+    "rp_exact_dup_frac",          # fraction of hands sharing a repeated full action signature
+    "rp_distinct_sig_ratio",      # distinct hand signatures / n_hands
+    "rp_token_unigram_entropy",   # normalized entropy of action-token distribution
+    "rp_cond_entropy",            # order-1 conditional entropy H(next|cur), normalized
+    "rp_gzip_ratio",              # zlib-compressed / raw size of token stream (low → repetitive)
+    "rp_lz76_norm",               # normalized Lempel-Ziv complexity (low → repetitive)
+    "rp_mean_pairwise_jaccard",   # mean Jaccard of per-hand action-bigram sets (high → similar hands)
+    "rp_hand_len_cv",             # CV of per-hand action-token length (low → fixed-length bot hands)
+]
+
 
 def _compute_schema_per_hand_features(hand: Dict[str, Any]) -> List[float]:
     """Compute 10 additional schema per-hand features (indices 19-28)."""
@@ -567,6 +582,168 @@ def _amount_bucket_label(value: float) -> str:
     return "xl"
 
 
+_ACTION_CODE = {"fold": "f", "check": "k", "call": "c", "bet": "b", "raise": "r"}
+
+
+def _hand_token_seq(hand: Dict[str, Any]) -> List[str]:
+    """Sanitization-surviving action-token sequence for one hand.
+
+    Each token = street-initial + action-code + amount-bucket, e.g. 'frm' =
+    flop-raise-medium. Uses only fields the validator keeps live (street,
+    action_type, coarse bb bucket) — no hero identity, no raw amounts, no seats.
+    """
+    toks: List[str] = []
+    for a in hand.get("actions") or []:
+        if not isinstance(a, dict):
+            continue
+        at = str(a.get("action_type", "") or "").lower()
+        code = _ACTION_CODE.get(at)
+        if code is None:
+            continue
+        st = str(a.get("street", "") or "").lower()
+        st_i = st[0] if st else "x"
+        bucket = _amount_bucket_label(float(a.get("normalized_amount_bb", 0.0) or 0.0))
+        toks.append(f"{st_i}{code}{bucket}")
+    return toks
+
+
+def _norm_entropy(counts: Sequence[float]) -> float:
+    """Shannon entropy normalized to [0,1] by log(#nonzero-symbols)."""
+    vals = [c for c in counts if c > 0]
+    if len(vals) <= 1:
+        return 0.0
+    total = float(sum(vals))
+    h = 0.0
+    for c in vals:
+        p = c / total
+        h -= p * math.log(p)
+    return h / math.log(len(vals))
+
+
+def _lz76_complexity(seq: Sequence[str]) -> int:
+    """Lempel-Ziv (Kaspar-Schuster 1976) phrase count of a symbol sequence."""
+    n = len(seq)
+    if n <= 1:
+        return n
+    i, k, l = 0, 1, 1
+    c, k_max = 1, 1
+    while True:
+        if seq[i + k - 1] == seq[l + k - 1]:
+            k += 1
+            if l + k > n:
+                c += 1
+                break
+        else:
+            if k > k_max:
+                k_max = k
+            i += 1
+            if i == l:
+                c += 1
+                l += k_max
+                if l + 1 > n:
+                    break
+                i, k, k_max = 0, 1, 1
+            else:
+                k = 1
+    return c
+
+
+def _replay_redundancy_features(hands: List[Dict[str, Any]]) -> List[float]:
+    """8 chunk-level self-redundancy features (bots replay templates; humans vary).
+
+    All values are ratios / normalized so 30-hand and 100-hand chunks are
+    comparable, and all are computed on hero-free, bb-bucketed tokens that
+    survive the validator's payload sanitizer.
+    """
+    n = len(hands)
+    if n == 0:
+        return [0.0] * 8
+
+    tok_seqs = [_hand_token_seq(h) for h in hands]
+    sigs = [tuple(t) for t in tok_seqs]
+
+    # 1. exact-duplicate fraction: hands whose full signature is shared (count>=2)
+    sig_ctr = Counter(sigs)
+    dup_hands = sum(c for c in sig_ctr.values() if c >= 2)
+    exact_dup_frac = dup_hands / n
+
+    # 2. distinct-signature ratio (effective template diversity)
+    distinct_sig_ratio = len(sig_ctr) / n
+
+    # Flattened token stream with hand separators.
+    flat: List[str] = []
+    for t in tok_seqs:
+        flat.extend(t)
+        flat.append("|")
+    ntok = max(1, len(flat))
+
+    # 3. token unigram entropy (normalized)
+    tok_unigram_entropy = _norm_entropy(list(Counter(flat).values()))
+
+    # 4. order-1 conditional entropy H(next|cur), normalized by unigram entropy
+    bigram_ctr: Counter = Counter(zip(flat[:-1], flat[1:]))
+    cur_ctr: Counter = Counter(flat[:-1])
+    cond_h = 0.0
+    total_bi = float(sum(bigram_ctr.values())) or 1.0
+    # group next-token distributions by current token
+    by_cur: Dict[str, List[int]] = {}
+    for (a, b), cnt in bigram_ctr.items():
+        by_cur.setdefault(a, []).append(cnt)
+    for cur, nexts in by_cur.items():
+        p_cur = cur_ctr[cur] / total_bi
+        cond_h += p_cur * _norm_entropy(nexts)
+    cond_entropy = cond_h
+
+    # 5. zlib compression ratio of the token stream (lower => more repetitive)
+    raw = "".join(flat).encode("utf-8")
+    comp = zlib.compress(raw, 6)
+    gzip_ratio = len(comp) / max(1, len(raw))
+
+    # 6. normalized LZ76 complexity (lower => more repetitive)
+    lz = _lz76_complexity(flat)
+    lz_norm = lz / (ntok / math.log(ntok + 1.0) + 1e-9)
+
+    # 7. mean pairwise Jaccard of per-hand action-bigram sets (higher => similar)
+    #    deterministic: cap at 40 evenly-spaced hands to bound O(n^2).
+    if n > 40:
+        step = n / 40.0
+        idxs = sorted({int(i * step) for i in range(40)})
+    else:
+        idxs = list(range(n))
+    bigram_sets: List[frozenset] = []
+    for i in idxs:
+        t = tok_seqs[i]
+        bigram_sets.append(frozenset(zip(t[:-1], t[1:])) if len(t) >= 2 else frozenset())
+    jac_sum, jac_pairs = 0.0, 0
+    for i in range(len(bigram_sets)):
+        for j in range(i + 1, len(bigram_sets)):
+            a, b = bigram_sets[i], bigram_sets[j]
+            union = a | b
+            if union:
+                jac_sum += len(a & b) / len(union)
+            jac_pairs += 1
+    mean_pairwise_jaccard = jac_sum / jac_pairs if jac_pairs else 0.0
+
+    # 8. mean hand length in tokens, normalized (bots often fixed-length)
+    lens = [len(t) for t in tok_seqs]
+    mean_len = sum(lens) / n
+    len_cv = (
+        math.sqrt(sum((L - mean_len) ** 2 for L in lens) / n) / (mean_len + 1e-9)
+        if n >= 2 else 0.0
+    )
+
+    return [
+        exact_dup_frac,
+        distinct_sig_ratio,
+        tok_unigram_entropy,
+        cond_entropy,
+        gzip_ratio,
+        lz_norm,
+        mean_pairwise_jaccard,
+        len_cv,
+    ]
+
+
 def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
     """Compute the 19 per-hand feature values for a single hand dict."""
     actions = hand.get("actions") or []
@@ -707,7 +884,7 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 317-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 325-float vector.
 
     Feature layout:
       [0:133]   per-hand statistics: 19 features × 7 stats
@@ -720,6 +897,7 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
       [293:305] sequence-collision features (12, novel)
       [305:311] pot-fraction + action-pattern features (6, novel)
       [311:317] intra-session consistency features (6, novel)
+      [317:325] replay-redundancy features (8: dup-frac, entropy, gzip/LZ76, Jaccard)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -1164,10 +1342,13 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         q_size_cv[-1] - q_size_cv[0],
     ]
 
+    # --- Replay-redundancy features (8) ---
+    replay_features = _replay_redundancy_features(hands)
+
     # --- Assemble final vector ---
     vec = (stat_features + chunk_sig_features + global_rate_features
            + street_features + temporal_features + collision_features
-           + pot_frac_features + intra_features)
+           + pot_frac_features + intra_features + replay_features)
 
     # Guard against any non-finite leakage so downstream models stay stable.
     return [float(v) if math.isfinite(v) else 0.0 for v in vec]

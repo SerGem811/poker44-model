@@ -160,7 +160,7 @@ class TrainedMiner(BaseMinerNeuron):
             ],
             defaults={
                 "model_name": "poker44-gbdt-behavioural",
-                "model_version": "7-way-within-batch-321-v1",
+                "model_version": "7-way-within-batch-325-v1",
                 "framework": "lightgbm+sklearn-ensemble" if self.model else "python-heuristic",
                 "license": "MIT",
                 "repo_url": "https://github.com/SerGem811/poker44-model",
@@ -169,17 +169,18 @@ class TrainedMiner(BaseMinerNeuron):
                 "inference_mode": "remote",
                 "notes": (
                     f"5-model ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
-                    f"BlendedIsotonicCalibrator. 321 behavioural features including "
+                    f"BlendedIsotonicCalibrator. 325 behavioural features including "
                     f"street action share, pot-fraction, intra-session consistency, and "
-                    f"raw amount/pot stats. Within-batch normalisation; variable batch "
-                    f"composition (30–70 bots) for robustness. Mode: {mode}."
+                    f"replay-redundancy (compression/LZ76/Jaccard/signature) signals. "
+                    f"Within-batch normalisation; variable batch composition "
+                    f"(30–70 bots) for robustness. Mode: {mode}."
                 ),
                 "training_data_statement": (
                     "Trained exclusively on the public Poker44 benchmark API "
                     "(api.poker44.net/api/v1/benchmark) using miner-visible chunk payloads "
                     "with chunk-level human/bot labels. 1740 sessions from benchmark releases "
-                    "May 26 – Jul 13 2026. 321 behavioural features including raw amount/pot "
-                    "stats. 5-model ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
+                    "May 26 – Jul 13 2026. 325 behavioural features including replay-redundancy "
+                    "signals. 5-model ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
                     "BlendedIsotonicCalibrator. Within-batch normalisation. No private data."
                 ),
                 "training_data_sources": ["poker44-public-benchmark"],
