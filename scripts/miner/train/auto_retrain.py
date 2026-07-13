@@ -40,6 +40,7 @@ from sklearn.metrics import average_precision_score  # noqa: E402
 from build_dataset import build, discover_dates  # noqa: E402
 from train_model import train_ensemble, simulate_windowed_reward, make_within_batch_data  # noqa: E402
 from poker44.miner_model.scoring_head import ScoringHead, shape_risk_score  # noqa: E402
+from poker44.miner_model.features import FEATURE_NAMES  # noqa: E402
 
 MODEL_PATH = os.path.join(REPO, "models", "poker44_gbdt.joblib")
 ARCHIVE_DIR = os.path.join(REPO, "models", "archive")
@@ -98,18 +99,22 @@ def evaluate_model(path, X_hold, y_hold):
 
     if not os.path.exists(path):
         return None
-    blob = joblib.load(path)
-    est = blob["estimator"]
-    head = ScoringHead.from_dict(blob.get("scoring_head", {}))
-    wbn = bool(blob.get("within_batch_norm", False))
-    if wbn:
-        Xwb, ywb = make_within_batch_data(X_hold, y_hold, n_batches=200, batch_size=100)
-        p = est.predict_proba(Xwb)[:, 1]
+    try:
+        blob = joblib.load(path)
+        est = blob["estimator"]
+        head = ScoringHead.from_dict(blob.get("scoring_head", {}))
+        wbn = bool(blob.get("within_batch_norm", False))
+        if wbn:
+            Xwb, ywb = make_within_batch_data(X_hold, y_hold, n_batches=200, batch_size=100)
+            p = est.predict_proba(Xwb)[:, 1]
+            shaped = np.array([head.score(v) for v in p])
+            return simulate_windowed_reward(shaped, ywb, window=20, trials=1500)
+        p = est.predict_proba(X_hold)[:, 1]
         shaped = np.array([head.score(v) for v in p])
-        return simulate_windowed_reward(shaped, ywb, window=20, trials=1500)
-    p = est.predict_proba(X_hold)[:, 1]
-    shaped = np.array([head.score(v) for v in p])
-    return simulate_windowed_reward(shaped, y_hold, window=20, trials=1500)
+        return simulate_windowed_reward(shaped, y_hold, window=20, trials=1500)
+    except (ValueError, Exception) as exc:
+        log(f"incumbent evaluation failed (feature count mismatch?): {exc} -> treating as no incumbent")
+        return None
 
 
 def promote(X_all, y_all, t_star, feature_names):
@@ -181,13 +186,13 @@ def main() -> int:
     r_curr = evaluate_model(MODEL_PATH, Xho, yho)
     if r_curr is None:
         log("no incumbent model found -> promoting candidate as first model")
-        promote(Xall, yall, t_star, None)
+        promote(Xall, yall, t_star, FEATURE_NAMES)
         return 0
     log(f"incumbent holdout_reward={r_curr:.4f} (note: may have trained on holdout dates -> conservative)")
 
     if r_cand > r_curr + MARGIN:
         log(f"DECISION: PROMOTE (candidate {r_cand:.4f} > incumbent {r_curr:.4f} + margin {MARGIN})")
-        promote(Xall, yall, t_star, None)
+        promote(Xall, yall, t_star, FEATURE_NAMES)
     else:
         log(f"DECISION: KEEP current (candidate {r_cand:.4f} <= incumbent {r_curr:.4f} + margin {MARGIN})")
     log("=== auto_retrain done ===")

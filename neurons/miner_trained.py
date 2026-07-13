@@ -160,7 +160,7 @@ class TrainedMiner(BaseMinerNeuron):
             ],
             defaults={
                 "model_name": "poker44-gbdt-behavioural",
-                "model_version": "7-way-within-batch-317-v2",
+                "model_version": "7-way-within-batch-321-v1",
                 "framework": "lightgbm+sklearn-ensemble" if self.model else "python-heuristic",
                 "license": "MIT",
                 "repo_url": "https://github.com/SerGem811/poker44-model",
@@ -168,21 +168,19 @@ class TrainedMiner(BaseMinerNeuron):
                 "open_source": True,
                 "inference_mode": "remote",
                 "notes": (
-                    f"7-model OOF stacked ensemble (lgbm×3 + ExtraTrees + RandomForest + "
-                    f"XGBoost + CatBoost) with BlendedIsotonicCalibrator. 311 behavioural "
-                    f"features including street action share, pot-fraction, and intra-session "
-                    f"consistency. Within-batch normalisation; variable batch composition "
-                    f"(30–70 bots) for robustness. Mode: {mode}."
+                    f"5-model ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
+                    f"BlendedIsotonicCalibrator. 321 behavioural features including "
+                    f"street action share, pot-fraction, intra-session consistency, and "
+                    f"raw amount/pot stats. Within-batch normalisation; variable batch "
+                    f"composition (30–70 bots) for robustness. Mode: {mode}."
                 ),
                 "training_data_statement": (
                     "Trained exclusively on the public Poker44 benchmark API "
                     "(api.poker44.net/api/v1/benchmark) using miner-visible chunk payloads "
-                    "with chunk-level human/bot labels. 1186 sessions (593 bot, 593 human) "
-                    "from benchmark releases May 26 – Jul 9 2026. 317 behavioural features. "
-                    "7-model OOF stacked ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
-                    "BlendedIsotonicCalibrator. Scoring head t_star=0.80 optimised on holdout "
-                    "under the Jul 8 2026 reward formula (AP×0.35 + recall@FPR5%×0.30 + "
-                    "threshold_sanity×0.30). Within-batch normalisation. No private data."
+                    "with chunk-level human/bot labels. 1740 sessions from benchmark releases "
+                    "May 26 – Jul 13 2026. 321 behavioural features including raw amount/pot "
+                    "stats. 5-model ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
+                    "BlendedIsotonicCalibrator. Within-batch normalisation. No private data."
                 ),
                 "training_data_sources": ["poker44-public-benchmark"],
                 "private_data_attestation": (

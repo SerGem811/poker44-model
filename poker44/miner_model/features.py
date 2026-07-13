@@ -334,6 +334,14 @@ FEATURE_NAMES += [
     "river_aggro_share",         # river bet+raise / all bet+raise across chunk (bots commit on river → more river aggression)
 ]
 
+# 4 raw amount + pot features (benchmark audit top-discriminators, AP 0.63-0.65 each)
+FEATURE_NAMES += [
+    "mean_normalized_amount_bb",  # mean of all non-zero bet amounts (in BB) across chunk
+    "std_normalized_amount_bb",   # std of the same (bots use fixed sizes → lower std)
+    "mean_pot_before",            # mean pot size before action across all actions in chunk
+    "mean_pot_after",             # mean pot size after action across all actions in chunk
+]
+
 
 def _compute_schema_per_hand_features(hand: Dict[str, Any]) -> List[float]:
     """Compute 10 additional schema per-hand features (indices 19-28)."""
@@ -707,7 +715,7 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 307-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 321-float vector.
 
     Feature layout:
       [0:133]   per-hand statistics: 19 features × 7 stats
@@ -715,10 +723,12 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
       [203:259] extra per-hand statistics: 8 features × 7 stats
       [259:267] chunk-level signature features (8, original)
       [267:271] global behavior rate features (4)
-      [271:283] temporal consistency features (12: lag1/2 autocorr, half-delta, trend slope)
-      [283:295] sequence-collision features (12, novel)
-      [295:301] pot-fraction + action-pattern features (6, novel)
-      [301:307] intra-session consistency features (6, novel)
+      [271:278] street action share features (7)
+      [278:293] temporal consistency features (15: lag1/2/3 autocorr, half-delta, trend slope)
+      [293:305] sequence-collision features (12, novel)
+      [305:311] pot-fraction + action-pattern features (6, novel)
+      [311:317] intra-session consistency features (6, novel)
+      [317:321] raw amount + pot features (4: mean/std amount_bb, mean pot_before/after)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -771,6 +781,9 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
     hero_flop_actions: int = 0
     hero_river_actions: int = 0
     hero_total_actions: int = 0
+    all_amounts_nonzero: List[float] = []
+    all_pot_before_vals: List[float] = []
+    all_pot_after_vals: List[float] = []
 
     for h in hands:
         actions = h.get("actions") or []
@@ -810,6 +823,14 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
             if at in _AGGRO and amt > 0:
                 chunk_sizes_all.append(amt)
                 chunk_sizes_bucket_indices.append(_bb_bucket_index(amt))
+            if amt > 0:
+                all_amounts_nonzero.append(amt)
+            pot_b_val = float(a.get("pot_before", 0.0) or 0.0)
+            pot_a_val = float(a.get("pot_after", 0.0) or 0.0)
+            if pot_b_val > 0:
+                all_pot_before_vals.append(pot_b_val)
+            if pot_a_val > 0:
+                all_pot_after_vals.append(pot_a_val)
         if hand_has_hero:
             hands_with_hero_action += 1
 
@@ -1163,10 +1184,29 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         q_size_cv[-1] - q_size_cv[0],
     ]
 
+    # --- Raw amount + pot features (4) ---
+    # These are chunk-level means/std of raw bet amounts and pot sizes.
+    # Benchmark audit identifies these as the highest-AP individual features.
+    def _smean(vals: List[float]) -> float:
+        return sum(vals) / len(vals) if vals else 0.0
+
+    def _sstd(vals: List[float]) -> float:
+        if len(vals) < 2:
+            return 0.0
+        m = _smean(vals)
+        return math.sqrt(sum((v - m) ** 2 for v in vals) / len(vals))
+
+    amount_pot_features = [
+        _smean(all_amounts_nonzero),
+        _sstd(all_amounts_nonzero),
+        _smean(all_pot_before_vals),
+        _smean(all_pot_after_vals),
+    ]
+
     # --- Assemble final vector ---
     vec = (stat_features + chunk_sig_features + global_rate_features
            + street_features + temporal_features + collision_features
-           + pot_frac_features + intra_features)
+           + pot_frac_features + intra_features + amount_pot_features)
 
     # Guard against any non-finite leakage so downstream models stay stable.
     return [float(v) if math.isfinite(v) else 0.0 for v in vec]

@@ -37,7 +37,29 @@ class EnsembleClassifier:
         self.calibrator = calibrator
         self.feature_names_in_: list | None = None
 
+    def _n_features_expected(self) -> int | None:
+        """Return expected feature count from first base model, or None."""
+        try:
+            return int(self.base_models[0][1].n_features_in_)
+        except Exception:
+            return None
+
+    def _align_features(self, X: np.ndarray) -> np.ndarray:
+        """Truncate or zero-pad X columns to match the trained feature count.
+
+        New features are always appended at the end of the feature vector, so
+        truncating is safe (the model simply ignores unknown tail features).
+        """
+        n_exp = self._n_features_expected()
+        if n_exp is None or X.shape[1] == n_exp:
+            return X
+        if X.shape[1] > n_exp:
+            return X[:, :n_exp]
+        pad = np.zeros((X.shape[0], n_exp - X.shape[1]), dtype=X.dtype)
+        return np.hstack([X, pad])
+
     def _raw_proba(self, X: np.ndarray) -> np.ndarray:
+        X = self._align_features(X)
         proba_sum = None
         for _name, clf in self.base_models:
             p = clf.predict_proba(X)[:, 1]
