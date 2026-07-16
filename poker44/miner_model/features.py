@@ -335,20 +335,6 @@ FEATURE_NAMES += [
     "river_aggro_share",         # river bet+raise / all bet+raise across chunk (bots commit on river → more river aggression)
 ]
 
-# 8 replay-redundancy features: bots replay near-identical hands; humans vary.
-# All hero-free / bb-bucketed / ratio-normalized → survive the sanitizer and are
-# chunk-size invariant. (Matches the redundancy family used by top miners.)
-FEATURE_NAMES += [
-    "rp_exact_dup_frac",          # fraction of hands sharing a repeated full action signature
-    "rp_distinct_sig_ratio",      # distinct hand signatures / n_hands
-    "rp_token_unigram_entropy",   # normalized entropy of action-token distribution
-    "rp_cond_entropy",            # order-1 conditional entropy H(next|cur), normalized
-    "rp_gzip_ratio",              # zlib-compressed / raw size of token stream (low → repetitive)
-    "rp_lz76_norm",               # normalized Lempel-Ziv complexity (low → repetitive)
-    "rp_mean_pairwise_jaccard",   # mean Jaccard of per-hand action-bigram sets (high → similar hands)
-    "rp_hand_len_cv",             # CV of per-hand action-token length (low → fixed-length bot hands)
-]
-
 
 def _compute_schema_per_hand_features(hand: Dict[str, Any]) -> List[float]:
     """Compute 10 additional schema per-hand features (indices 19-28)."""
@@ -884,7 +870,7 @@ def _compute_per_hand_features(hand: Dict[str, Any]) -> List[float]:
 
 
 def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
-    """Project one chunk (list of miner-visible hand dicts) to a 325-float vector.
+    """Project one chunk (list of miner-visible hand dicts) to a 317-float vector.
 
     Feature layout:
       [0:133]   per-hand statistics: 19 features × 7 stats
@@ -897,7 +883,6 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
       [293:305] sequence-collision features (12, novel)
       [305:311] pot-fraction + action-pattern features (6, novel)
       [311:317] intra-session consistency features (6, novel)
-      [317:325] replay-redundancy features (8: dup-frac, entropy, gzip/LZ76, Jaccard)
     """
     hands = [h for h in (chunk or []) if isinstance(h, dict)]
     if not hands:
@@ -1342,13 +1327,10 @@ def extract_chunk_features(chunk: List[Dict[str, Any]]) -> List[float]:
         q_size_cv[-1] - q_size_cv[0],
     ]
 
-    # --- Replay-redundancy features (8) ---
-    replay_features = _replay_redundancy_features(hands)
-
     # --- Assemble final vector ---
     vec = (stat_features + chunk_sig_features + global_rate_features
            + street_features + temporal_features + collision_features
-           + pot_frac_features + intra_features + replay_features)
+           + pot_frac_features + intra_features)
 
     # Guard against any non-finite leakage so downstream models stay stable.
     return [float(v) if math.isfinite(v) else 0.0 for v in vec]

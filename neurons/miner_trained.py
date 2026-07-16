@@ -53,13 +53,16 @@ class TrainedModel:
 
     def __init__(self, estimator, head: ScoringHead, feature_names: List[str],
                  transformer=None, transformer_weight: float = 0.5,
-                 within_batch_norm: bool = False):
+                 within_batch_norm: bool = False, kind: str = "classifier",
+                 rank_calibration: Optional[dict] = None):
         self.estimator = estimator
         self.head = head
         self.feature_names = feature_names
         self.transformer = transformer
         self.transformer_weight = transformer_weight
         self.within_batch_norm = within_batch_norm  # normalize batch against itself before scoring
+        self.kind = kind                            # "classifier" | "ranker"
+        self.rank_calibration = rank_calibration or {}
 
     @classmethod
     def load(cls, path: str) -> Optional["TrainedModel"]:
@@ -77,10 +80,57 @@ class TrainedModel:
                 transformer=blob.get("transformer"),
                 transformer_weight=float(blob.get("transformer_weight", 0.5)),
                 within_batch_norm=bool(blob.get("within_batch_norm", False)),
+                kind=str(blob.get("kind", "classifier")),
+                rank_calibration=blob.get("rank_calibration"),
             )
         except Exception as exc:  # pragma: no cover - defensive load
             bt.logging.warning(f"Failed to load model from {path}: {exc}")
             return None
+
+    def _wbn(self, x):
+        import numpy as np
+        if self.within_batch_norm and len(x) >= 10:
+            mean = x.mean(axis=0)
+            std = x.std(axis=0)
+            std = np.where(std < 1e-8, 1.0, std)
+            return np.clip((x - mean) / std, -5.0, 5.0)
+        return x
+
+    def _rank_calibrate(self, raw) -> List[float]:
+        """Map raw ranker scores to [0,1] within the batch, preserving order.
+
+        Top ``bot_frac`` by rank map to [bot_low, bot_hi] (>0.5 => flagged bots);
+        the rest map to [hum_low, hum_hi] (<0.5 => guarantees human-safety = 1.0).
+        Rank order is preserved inside each band so AP / recall are unchanged.
+        """
+        import numpy as np
+        c = self.rank_calibration
+        bot_frac = float(c.get("bot_frac", 0.15))
+        bl, bh = float(c.get("bot_low", 0.55)), float(c.get("bot_hi", 0.92))
+        hl, hh = float(c.get("hum_low", 0.02)), float(c.get("hum_hi", 0.48))
+        arr = np.asarray(raw, dtype=float)
+        n = len(arr)
+        if n == 0:
+            return []
+        frac = np.argsort(np.argsort(arr)) / max(1, n - 1)  # rank fraction 0..1
+        thr = 1.0 - bot_frac
+        out = np.where(
+            frac >= thr,
+            bl + (bh - bl) * (frac - thr) / max(1e-9, 1.0 - thr),
+            hl + (hh - hl) * (frac / max(1e-9, thr)),
+        )
+        return [float(v) for v in np.clip(out, 0.0, 1.0)]
+
+    def score_final(self, feats: List[List[float]],
+                    raw_chunks: Optional[List[list]] = None) -> List[float]:
+        """Return final risk scores in [0,1] for the whole batch."""
+        import numpy as np
+        x = self._wbn(np.asarray(feats, dtype=float))
+        if self.kind == "ranker":
+            raw = self.estimator.predict(x)
+            return self._rank_calibrate(raw)
+        probs = self.proba(feats, raw_chunks=raw_chunks)
+        return self.head.score_many(probs)
 
     def proba(self, feats: List[List[float]], raw_chunks: Optional[List[list]] = None) -> List[float]:
         import numpy as np
@@ -151,6 +201,20 @@ class TrainedMiner(BaseMinerNeuron):
         norm_mode = "within-batch" if (self.model and self.model.within_batch_norm) else "raw"
         bt.logging.info(f"🧠 Poker44 TrainedMiner started (mode={mode}, norm={norm_mode})")
 
+        # Optional d0 ensemble scorer (adapted 4-model rank-blend). Activated by
+        # env POKER44_USE_D0=1 OR a vendor/d0/ENABLED sentinel (survives pm2
+        # restarts / cron retrains). When active it replaces the GBDT path.
+        self.d0 = None
+        _d0_on = (os.getenv("POKER44_USE_D0", "") == "1"
+                  or (repo_root / "vendor" / "d0" / "ENABLED").exists())
+        if _d0_on:
+            try:
+                from poker44.miner_model.d0_adapter import D0Scorer
+                self.d0 = D0Scorer.load()
+            except Exception as exc:
+                bt.logging.warning(f"d0 scorer init failed: {exc}")
+            bt.logging.info(f"🐉 d0 ensemble scorer {'ACTIVE' if self.d0 else 'unavailable'}")
+
         self.model_manifest = build_local_model_manifest(
             repo_root=repo_root,
             implementation_files=[
@@ -159,8 +223,8 @@ class TrainedMiner(BaseMinerNeuron):
                 repo_root / "poker44" / "miner_model" / "scoring_head.py",
             ],
             defaults={
-                "model_name": "poker44-gbdt-behavioural",
-                "model_version": "7-way-within-batch-325-v1",
+                "model_name": "poker44-rank-detector",
+                "model_version": "lambdamart-ranker-livesize-v1",
                 "framework": "lightgbm+sklearn-ensemble" if self.model else "python-heuristic",
                 "license": "MIT",
                 "repo_url": "https://github.com/SerGem811/poker44-model",
@@ -168,20 +232,19 @@ class TrainedMiner(BaseMinerNeuron):
                 "open_source": True,
                 "inference_mode": "remote",
                 "notes": (
-                    f"5-model ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
-                    f"BlendedIsotonicCalibrator. 325 behavioural features including "
-                    f"street action share, pot-fraction, intra-session consistency, and "
-                    f"replay-redundancy (compression/LZ76/Jaccard/signature) signals. "
-                    f"Within-batch normalisation; variable batch composition "
-                    f"(30–70 bots) for robustness. Mode: {mode}."
+                    f"LightGBM LambdaMART ranker over 317 size-invariant behavioural "
+                    f"features (per-hand action/entropy/sizing aggregates + sequence "
+                    f"signatures). Ranking objective trained on within-batch-normalised "
+                    f"groups so it optimises within-batch bot ranking directly; training "
+                    f"chunks are concatenated to live session length (~80 hands). Inference "
+                    f"applies within-batch normalisation + rank-gate calibration. Mode: {mode}."
                 ),
                 "training_data_statement": (
                     "Trained exclusively on the public Poker44 benchmark API "
                     "(api.poker44.net/api/v1/benchmark) using miner-visible chunk payloads "
-                    "with chunk-level human/bot labels. 1740 sessions from benchmark releases "
-                    "May 26 – Jul 13 2026. 325 behavioural features including replay-redundancy "
-                    "signals. 5-model ensemble (lgbm×3 + ExtraTrees + RandomForest) with "
-                    "BlendedIsotonicCalibrator. Within-batch normalisation. No private data."
+                    "with chunk-level human/bot labels. 317 size-invariant behavioural "
+                    "features. LightGBM LambdaMART ranker (lambdarank) trained on "
+                    "within-batch-normalised ranking groups. No private data."
                 ),
                 "training_data_sources": ["poker44-public-benchmark"],
                 "private_data_attestation": (
@@ -202,6 +265,20 @@ class TrainedMiner(BaseMinerNeuron):
 
     def _score_chunks(self, chunks: List[list]) -> List[float]:
         import numpy as np
+
+        # d0 ensemble path (self-contained: takes validator-sanitized chunks,
+        # returns risk in [0,1] with threshold pre-mapped to 0.5).
+        if self.d0 is not None and chunks:
+            try:
+                scores = self.d0.score_chunks(chunks)
+                bt.logging.info(
+                    f"[d0] scored {len(chunks)} | flagged={sum(1 for s in scores if s >= 0.5)} "
+                    f"| range=[{min(scores):.3f},{max(scores):.3f}]"
+                )
+                return scores
+            except Exception as exc:
+                bt.logging.warning(f"d0 scoring failed: {exc}; falling back to GBDT")
+
         feats = [extract_chunk_features(chunk) for chunk in chunks]
         if chunks:
             n0 = len(chunks[0])
@@ -222,10 +299,14 @@ class TrainedMiner(BaseMinerNeuron):
                 except Exception as exc:
                     bt.logging.warning(f"[DEBUG] Feature dump failed: {exc}")
         if self.model is not None:
-            probs = self.model.proba(feats, raw_chunks=chunks)
+            scores = self.model.score_final(feats, raw_chunks=chunks)
             if chunks:
-                bt.logging.info(f"[DEBUG] raw_prob[0]={probs[0]:.4f}, raw_prob_range=[{min(probs):.4f},{max(probs):.4f}]")
-            return self.model.head.score_many(probs)
+                bt.logging.info(
+                    f"[{self.model.kind}] scored {len(chunks)} | "
+                    f"flagged={sum(1 for s in scores if s >= 0.5)} "
+                    f"| range=[{min(scores):.3f},{max(scores):.3f}]"
+                )
+            return scores
         probs = [_heuristic_proba(f) for f in feats]
         return [round(shape_risk_score(p, self.fallback_head.t_star, self.fallback_head.sharpness), 6) for p in probs]
 
