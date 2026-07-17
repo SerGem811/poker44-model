@@ -190,4 +190,22 @@ def check_config(cls, config: "bt.Config"):
 def config(cls) -> bt.Config:
     parser = argparse.ArgumentParser()
     cls.add_args(parser)
-    return bt.Config(parser=parser)
+    cfg = bt.Config(parser=parser)
+    # bittensor >=10's bt.Config(parser=...) builds the config from parser DEFAULTS
+    # and ignores the actual CLI values (9.x applied them). Re-apply the parsed
+    # args so --wallet.*, --subtensor.*, --netuid, --neuron.*, --blacklist.* etc.
+    # take effect, nesting dotted keys into their namespaces.
+    parsed, _ = parser.parse_known_args()
+    for key, val in vars(parsed).items():
+        if "." in key:
+            ns, sub = key.split(".", 1)
+            if cfg.get(ns, None) is None:
+                cfg[ns] = bt.Config()
+            setattr(cfg[ns], sub, val)
+        else:
+            cfg[key] = val
+    if cfg.get("neuron", None) is None:
+        cfg.neuron = bt.Config()
+    if cfg.neuron.get("name", None) is None:
+        cfg.neuron.name = "poker44_miner"
+    return cfg
