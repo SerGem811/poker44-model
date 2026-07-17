@@ -240,19 +240,22 @@ class TrainedMiner(BaseMinerNeuron):
                     f"applies within-batch normalisation + rank-gate calibration. Mode: {mode}."
                 ),
                 "training_data_statement": (
-                    "Trained exclusively on the public Poker44 benchmark API "
-                    "(api.poker44.net/api/v1/benchmark) using miner-visible chunk payloads "
-                    "with chunk-level human/bot labels. 317 size-invariant behavioural "
-                    "features. LightGBM LambdaMART ranker (lambdarank) trained on "
-                    "within-batch-normalised ranking groups. No private data."
+                    "Trained on public data only: (1) the public Poker44 benchmark API "
+                    "(api.poker44.net/api/v1/benchmark) miner-visible chunk payloads with "
+                    "chunk-level bot labels (bot class), and (2) a public corpus of real "
+                    "human micro-stakes poker hand histories (human class). 317 size-invariant "
+                    "behavioural features. LightGBM LambdaMART ranker (lambdarank) trained on "
+                    "within-batch-normalised ranking groups. No validator-private data."
                 ),
-                "training_data_sources": ["poker44-public-benchmark"],
+                "training_data_sources": [
+                    "poker44-public-benchmark", "public-human-hand-histories",
+                ],
                 "private_data_attestation": (
                     "This miner does not train on validator-only evaluation data. "
                     "Only the public benchmark API (miner-visible chunk payloads) is used. "
                     "No live evaluation data is used for training or fine-tuning."
                 ),
-                "data_attestation": "public-benchmark-only",
+                "data_attestation": "public-data-only",
             },
         )
         self.manifest_compliance = evaluate_manifest_compliance(self.model_manifest)

@@ -225,3 +225,5 @@ vendor/d0/*.log
 vendor/d0/data_cache.pkl
 vendor/d0/
 models/poker44_ranker.joblib
+data/real_humans/
+models/poker44_ranker_aug.joblib
